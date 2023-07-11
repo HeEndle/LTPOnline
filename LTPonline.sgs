@@ -4,10 +4,13 @@ Proc Versions()
 '------------------------------------Changelog---------------------------------------
 'LTPOnline Script Versions
 '1.4b    - Refactored new LTPOnline Script
+'1.41b   - Added manual cursor positioning /need: save cursor positions for each frame state
+'1.41b   - Added saving cursor positions for each frame state
 end;
 '---------------------------Global Variable Declarations-----------------------------
-var LTPOnlineVersion$:="1.4b";    'Script Version
+var LTPOnlineVersion$:="1.41b";    'Script Version
 var SampleStates%:=SampleStates(); 'stores the number of frame states (number of stimulation Channels)
+var FrameStates%[0];               'stores the frame states as a list
 '------------View and Channel handles--------
 var configFile%;          'handle for config file
 var samplingFile%;        'view handle for the currend sampling file
@@ -17,25 +20,28 @@ var slopePlot%;           'view handle for online plot of Slope
 var ampPlot%;             'view handle for online plot of amplitude
 var FVPlot%;              'view handle for online plot of Fiber Volley
 var avgdata%[2][SampleStates%];       'View handle of averaged data [0][] contains the views [1][] contains the channels
-'------------View and Channel handles----------
+'----------------Dialog handles--------------
 var dlgTextIO%;           'stores item numbers IO-Module Explanation Dlg text
+'--------------Cursor Positions--------------
+var CursorPositions[SampleStates%][8][1];      'stores the position for cursors
 '-----------------Flags------------------------
 '---State strings for display---
 var recstate$:="STOPPED";            'stores recording state as String for display to user
-var ModeStr$[]:={"Idle","Scanning File","Input/Output","Baseline","LTP"};           'Mode as string for display to user
+var ModeStr$[]:={"Idle","Scanning File","Input/Output","Baseline","LTP induction","LTP"};           'Mode as string for display to user
 '---Internal flags--------------
-var Mode%:=0;             'flag for recording mode (index of ModeStr$)
+var Mode%:=0;                               'flag for recording mode (index of ModeStr$)
+var manualCursorMap%[SampleStates%][2];     'flags (one for each frame state) for modules that set cursors manually
 '---------------Recording Parameters-----------
 var SamplingInterval:=15;     'Stores the samplinginterval in s
-var XTick:=60;            'Stores x-axis tick length in s
+var XTick:=60;                'Stores x-axis tick length in s
 '------------Response detection settings--------------------
 '------------Modules---------------------------
 var currentDetectionModule%; 'stores currently selected detection module as index of detectionModules$
-var detectionModules$[]:={"Auto v1.39"};
+var detectionModules$[]:={"Auto v1.39","Manual Cursor Positions"};
 var currentIOModule%;        'stores currently selected IO module as index of detectionModules$
 var IOModules$[]:={"I/O Manual v1.39"};
 var IOModulesExplanation$[]:={"IO Curve 1V to 9V, 2V-6V in triple replicates"};
-'------------Variables-------------------------
+'------------Settings-------------------------
 var high%:=90;            'high percent of slope (eg. 90)
 var low%:=10;             'low percent of slope (eg. 10)
 var average:=5;           'Stores the number of minutes to average
@@ -45,6 +51,7 @@ var lowpass:=0;           'Lowpass cutoff value for filtering false detections i
 #include "libs/libLTPCursor.sgs"
 #include "libs/libAnalysisTools.sgs"
 #include "libs/libFileHandling.sgs"
+#include "libs/libArrayMap.sgs"
 #include "libs/libIOCurve.sgs"
 '------------------------------------------------------------
 
@@ -54,14 +61,17 @@ Halt;
 
 '-----Module Registration----
 'Register your Cursor setter modules here in this function
-Func LTPSetCursor(dataView%, channel%, usercorrect%)
+Func LTPSetCursor(dataView%, channel%, high%, low%, usercorrect%)
 docase
     case currentDetectionModule% = 0 then LTPCursorSetv139(dataView%,channel%, usercorrect%);   'Auto v1.39
-    case currentDetectionModule% = 1 then
-    if then
-        LTPCursorSetManual(dataView%,channel%,high%,low%);
-    endif;
-    
+    case currentDetectionModule% = 1 then                                                       'Manual
+        if getMapValue%(manualCursorMap%,FrameState(-2)) <> 1 then  'if the cursors for this frame state have not been set yet
+            LTPCursorSetManual(dataView%,channel%,high%,low%);  'let the user set the cursors
+            SaveCursors(CursorPositions);                       'save cursor positions
+            setMapValue%(manualCursorMap%,FrameState(-2),1);    'flag cursors for this frame state as set
+        else;
+            LoadCursors(CursorPositions);
+        endif;    
 endcase
 return;
 end;
@@ -99,7 +109,7 @@ if samplingFile% <> 0 then  'if there is an open file to work on
         
         Frame(lastFrame%+1);    'Go to next unprocessed frame
         UpdateToolbarText();
-        LTPSetCursor(samplingFile%,ch%,0);
+        LTPSetCursor(samplingFile%,ch%,high%,low%,0);
         plotDataFrame();
         
         if Mode% = 2 then       'if IO mode is turned on
@@ -119,7 +129,10 @@ end;
 Func Start%()               'Button 2 START SAMPLING routine
 
 ch%:=ChanSelectDlg(samplingFile%);
-
+SampleStates%:=SampleStates();
+getSampleStateList%(FrameStates%);              'get list of frame states from File
+createMap%(manualCursorMap%,FrameStates%);      'create a map containing all frame states as keys and all values set to 0
+resize CursorPositions[SampleStates%][][];      'resize array to store cursor positions for all frame states
 SampleStart();
 recstate$:="RECORDING";
 UpdateToolbarText();
@@ -148,8 +161,10 @@ end;
 
 Func rescan%()              'Button 5 for rescanning files
 samplingFile%:= FileOpen("",0,1);    'display file open dialog
-SampleStates%:=GetFileFrameStates%();
-resize avgdata%[][SampleStates%];
+SampleStates%:=GetFileFrameStateList%(FrameStates%); 'get number of frame states from File
+createMap%(manualCursorMap%,FrameStates%); 'create a map containing all frame states as keys and all values set to 0
+resize CursorPositions[SampleStates%][][];  'resize array to store cursor positions for all frame states
+resize avgdata%[][SampleStates%];   'fit arry size to number of frame states
 CursorDelete(-1);   'clear all existing cursors
 Window(0,0,50,100); 'And display on the left side of the screen
 ch%:=ChanSelectDlg(samplingFile%); 'Diplay channel selection dialog
@@ -167,7 +182,9 @@ var n%;     'counter
 if SampleStatus() = -1 then
     if not samplingFile% then    'if no file is opened by the script, display fileopen dialog
         samplingFile%:= FileOpen("",0,1);    'display file open dialog
-        SampleStates%:=GetFileFrameStates%();   'set number of frame states from File
+        SampleStates%:=GetFileFrameStateList%(FrameStates%);   'set number of frame states from File
+        createMap%(manualCursorMap%,FrameStates%);  'create a map containing all frame states as keys and all values set to 0
+        resize CursorPositions[SampleStates%][][];  'resize array to store cursor positions for all frame states
         resize avgdata%[][SampleStates%];       'fit arry size to number of frame states
         CursorDelete(-1);   'clear all existing cursors
         Window(0,0,50,100); 'And display on the left side of the screen
@@ -178,7 +195,7 @@ if SampleStatus() = -1 then
     averageTrace();
     
     for n%:=0 to len(avgdata%[0][])-1 do    'set the cursors in the newly created average views
-        LTPSetCursor(avgdata%[0][n%],1,1);  'allow user to correct the cursor positions if necessary
+        LTPSetCursor(avgdata%[0][n%],1,high%,low%,1);  'allow user to correct the cursor positions if necessary
     next;
     
     offlinePlot(avgdata%,1,50,0,100,50);
@@ -194,6 +211,8 @@ end;
 
 Func Settings%()            'Button 7 for Settings
 
+ReadConfig();
+
 var dlgElement%:=1;    'iterates element position
 var dlgItem%:=1;       'iterates dialog item number
 
@@ -201,7 +220,7 @@ DlgCreate("LTPOnline Settings");
 
 DlgGroup("Response detection setting",0,dlgElement%,0,4);
 dlgElement%+=1;
-DlgList(dlgItem%,"Detection Module:",detectionModules$,0,0,dlgElement%);
+DlgList(dlgItem%,"Detection Module:",detectionModules$,len(detectionModules$),0,dlgElement%);
 dlgItem%+=1;
 dlgElement%+=1;
 DlgInteger(dlgItem%,"Slope start in % of Amplitude",0,100,0,dlgElement%);
@@ -233,10 +252,11 @@ dlgElement%+=1;
 
 DlgGroup("Script Module Versions",0,dlgElement%,0,3);
 dlgElement%+=1;
-DlgText("LTP Online Skript Version: "+LTPOnlineVersion$+"\nResponse Detection Version: "+libLTPCursorVersion$+"\nAnalysis Tools Version: "+libAnalysisToolsVersion$,0,dlgElement%);
+DlgText("LTP Online Script Version: "+LTPOnlineVersion$+"\nResponse Detection Version: "+libLTPCursorVersion$+"\nAnalysis Tools Version: "+libAnalysisToolsVersion$,0,dlgElement%);
 
 DlgAllow(0,0,SettingsChanged%);
 DlgShow(currentDetectionModule%,high%,low%,lowpass,currentIOModule%,average);
+WriteConfig();
 return 1; 'This leaves toolbar active
 end;
 
@@ -273,7 +293,7 @@ UpdateToolbarText();
 return 1;
 end;
 Func LTP%()                 'LTP recording
-Mode%:=4;
+Mode%:=5;
 UpdateToolbarText();
 return 1;
 end;
@@ -316,8 +336,8 @@ View(samplingFile%)
 var YUnit$:=ChanUnits$(ch%);
 var XUnit$:=XUnits$();
 
-FVPlot%:=MakePlot(XTick,YUnit$,str$(low%)+" to "+str$(high%)+" Slope",50,0,100,33);
-ampPlot%:=MakePlot(XTick,YUnit$,str$(low%)+" to "+str$(high%)+" Slope",50,33,100,66);
+FVPlot%:=MakePlot(XTick,YUnit$,"Fiber Volley",50,0,100,33);
+ampPlot%:=MakePlot(XTick,YUnit$,"Amplitude",50,33,100,66);
 slopePlot%:=MakePlot(XTick,YUnit$+"/"+XUnit$,str$(low%)+" to "+str$(high%)+" Slope",50,66,100,100);
 
 end;
@@ -439,4 +459,70 @@ for n%:=0 to SampleStates%-1 do             'loop through array and copy all the
 next;
 return samplestates%;                       'return number of states 
 
+end;
+
+Func getSampleStateList%(allStates%[])      'get list of sample states, the array allStates[] will be filled with a list of the sample states
+'---local variables---
+var n%; 'counter
+'---------------------
+
+resize allStates%[SampleStates%];   'set array to fit all sample States
+
+for n%:=1 to len(allStates%) do 'loop through array and write Sample states
+    allStates%[n%-1]:=n%;
+next;
+
+return;
+end;
+Proc ReadConfig()   'Read config file and load values stored in it
+'---local variables---
+var currentview%:=View();   'save current view
+var config%:=LoadConfig();  'load config file
+var value$;
+'---------------------
+
+value$:=ReadConfigEntry$(config%,"DetectionModule");
+if value$ <> "null" then
+    currentDetectionModule%:=Val(value$);
+endif;
+
+value$:=ReadConfigEntry$(config%,"IOCurve");
+if value$ <> "null" then
+    currentIOModule%:=Val(value$);
+endif;
+
+value$:=ReadConfigEntry$(config%,"SlopeTo");
+if value$ <> "null" then
+    high%:=Val(value$);
+endif;
+
+value$:=ReadConfigEntry$(config%,"SlopeFrom");
+if value$ <> "null" then
+    low%:=Val(value$);
+endif;
+
+value$:=ReadConfigEntry$(config%,"Average");
+if value$ <> "null" then
+    average:=Val(value$);
+endif;
+
+View(config%);
+FileClose(0,-1); 'Close config file
+View(currentview%); 'return to current view
+end;
+Proc WriteConfig()  'Write current setting to config file
+'---local variables---
+var currentview%:=View();   'save current view
+var config%:=LoadConfig();  'load config file
+'---------------------
+
+WriteConfigEntry(config%,"DetectionModule",Str$(currentDetectionModule%));
+WriteConfigEntry(config%,"IOCurve",Str$(currentIOModule%));
+WriteConfigEntry(config%,"SlopeTo",Str$(high%));
+WriteConfigEntry(config%,"SlopeFrom",Str$(low%));
+WriteConfigEntry(config%,"Average",Str$(average));
+
+View(config%);
+FileClose(0,-1); 'Close config file
+View(currentview%); 'return to current view
 end;

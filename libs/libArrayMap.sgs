@@ -1,0 +1,210 @@
+'libArrayMap
+'Library of functions for using a simple two dimensional array
+'------------------------------------Changelog---------------------------------------
+'1.0  -   initial release. Integer maps only.
+'---------------------------Global Variable Declarations-----------------------------
+var libArrayMapVersion$:="1.0";
+
+'var testkeys%[] := {1,2,3,4,5,6};
+'var testmap%[6][2] := {{1,2,3,4,5,6},{1,2,3,4,5,6}};
+'var testmap3D[6][2][2] := {{{1,2,3,4,5,6},{1,2,3,4,5,6}},{{1,2,3,4,5,6},{1,2,3,4,5,6}}};
+
+'---Functions for maps containing integers---
+Func createMap%(map%[][],keys%[])   'creates new map containing the keys in array keys%[]
+'---local variables---
+var n%; 'counter
+var i%; 'counter
+var keyFound%:=0;  'flag if key has been found
+var doublings%:=0;
+'---------------------
+
+resize map%[len(keys%)][2];
+
+for n%:=0 to len(map%[][0])-1 do 'loop through array
+    
+    for i%:=0 to n%-1-doublings% do         'loop through already writeen keys
+        if map%[i%][0] = keys%[n%] then 'if the next key already exists in the map
+            keyFound%:=1;           'mark as doubling
+            doublings%+=1;
+            break;
+        endif;        
+    next;
+    
+    if keyFound% <> 1 then           'if the key is unique
+        map%[n%-doublings%][0]:=keys%[n%];      'write key in map
+        map%[n%-doublings%][1]:=0;              'delete existing value
+        keyFound%:=0;
+    else                             'if the key is not unique skip it
+        keyFound%:=0;
+    endif;
+    
+next;
+
+if doublings% > 0 then
+    resize map%[len(keys%)-doublings%][];
+endif;
+
+
+end;
+
+Func getMapValue%(map%[][],key%)  'Gets a value form a two dimensional array treated as a map with [x][0] holding the keys and [x][1] holding the values. Returns -1 if the key was not found.
+'---local variables---
+var n%; 'counter
+'---------------------
+for n%:=0 to len(map%[][0])-1 do 'loop through array
+    if map%[n%][0] = key% then    'look for key
+        return map%[n%][1];         'if key is found return value
+    endif;    
+next;
+
+return -1;  'if the key was not found return -1
+end;
+
+Func setMapValue%(map%[][],key%,value%) 'Sets a value form a two dimensional array treated as a map with [x][0] holding the keys and [x][1] holding the values. Returns -1 if the key was not found.
+'---local variables---
+var n%; 'counter
+'---------------------
+for n%:=0 to len(map%[][0])-1 do 'loop through array
+    if map%[n%][0] = key% then    'look for key
+        map%[n%][1]:=value%;      'if key is found write value
+        return; 
+    endif;    
+next;
+
+return -1;  'if the key was not found return -1
+end;
+
+Func addMapElement%(map%[][],key%,value%)   'Add a value & key pair to the map. Returns 1 if element was added succesfully, returns -1 if element could not be added (beacuse of non unique key)
+
+if getMapValue%(map%,key%) = -1 then
+    resize map%[len(map%[][0])+1][];    'increase array size by one
+
+    map%[len(map%[][0])-1][0]:=key%;    'set key
+    map%[len(map%[][0])-1][1]:=value%;  'set value
+    return 1;   'return 1 if element has been added
+else
+    return -1;  'return -1 if key is not unique
+endif;
+
+end;
+
+Func deleteMapElement%(map%[][],key%)    'Remove a value & key pair from map. Returns 1 if element was deleted succesfully, returns -1 if element could not be found
+'---local variables---
+var n%; 'counter
+var keyFound%:=0;  'flag if key has been found
+'---------------------
+for n%:=0 to len(map%[][0])-1 do 'loop through array
+    if map%[n%][0] = key% then      'look for key
+        keyFound%:=1;               'mark that a matching key has been found
+        break;
+    endif;    
+next;
+
+if keyFound% = 1 then               'if a mathing key has been found
+    for n%:=n% to len(map%[][0])-2 do
+        map%[n%][0]:=map%[n%+1][0]; 'copy key from the next element in list
+        map%[n%][1]:=map%[n%+1][1]; 'copy value from the next element in list
+    next;
+    resize map%[len(map%[][0])-1][];    'delete last element in list
+    return 1;
+else                                'if a matching key has not been found
+    return -1;
+endif;
+
+end;
+'---Functions for Maps containing real arrays---
+Func createMapArray(map[][][],lenght%,keys[]) 'creates new array of maps of the length lenght%
+'---local variables---
+var n%; 'counter
+var i%; 'counter
+var uniqueKeys[0];
+var keyFound%:=0;  'flag if key has been found
+var doublings%:=0;
+'---------------------
+
+resize map[lenght%][len(keys)][2];
+
+clear3D(map);   'clear map
+
+for n%:=0 to len(map[][0][0])-1 do 'loop through array
+    
+    for i%:=0 to n%-1-doublings% do         'loop through already writeen keys
+        if map[i%][0][0] = keys[n%] then    'if the next key already exists in the map
+            keyFound%:=1;                   'flag as doubling
+            doublings%+=1;                  'mark one additional doubling
+            break;
+        endif;        
+    next;
+    
+    if keyFound% <> 1 then                      'if the key is unique
+        map[n%-doublings%][0][0]:=keys[n%];     'write key in map                  
+        keyFound%:=0;                           'reste flag
+    else                                        'if the key is not unique skip it
+        keyFound%:=0;                           'reset flag
+    endif;
+    
+next;
+
+if doublings% > 0 then
+    resize map[len(keys)-doublings%][][];       'if there have been doublings resize the map to account for it
+endif;
+
+
+return;
+end;
+
+Func getMapFromArray%(map[][][],index%,returnArray[][])   'Gets a value form a three dimensional array treated as a map with [x][0][0] holding the keys
+'---local variables---
+var n%; 'counter
+var x%; 'counter
+var y%; 'counter
+resize returnArray[len(map[0][][0])][len(map[0][0][])];
+'---------------------
+
+for n%:=0 to len(map[][0][0])-1 do 'loop through array
+    if map[n%][0][0] = index% then    'look for key
+        for x%:=0 to len(map[0][][0])-1 do 'loop 2D through array
+            for y%:=0 to len(map[0][0][])-1 do 'loop 2D through array
+                map[n%][x%][y%]:=returnArray[x%][y%];   'write current filed in returnarray
+            next;            
+        next;
+        return 1;         'if key is found return 1
+    endif;    
+next;
+
+return -1;  'if the key was not found return -1
+end;
+'---Functions for arrays containing maps---
+Func getMapValueFromArray(map[][][],index%,key2)
+'---local variables---
+var n%; 'counter
+var innerMap[len(map[0][][0])][len(map[0][0][])];
+var error%;
+'---------------------
+error%:=getMapFromArray%(map,index%,innerMap);   'get inner map
+if error% = -1 then return -1 endif;        'return -1 if key to outer map is not found
+
+for n%:=0 to len(innerMap[][0])-1 do 'loop through array
+    if innerMap[n%][0] = key2 then    'look for inner map key
+        return innerMap[n%][1];         'if key is found return value
+    endif;    
+next;
+
+return -1;
+end;
+Proc clear3D(arr[][][]) 'clears a 3D array (sets all elements to 0)
+'---local variables---
+var z%; 'counter
+var x%; 'counter
+var y%; 'counter
+'---------------------
+
+for z%:=0 to len(arr[][0][0])-1 do 'loop through array
+    for x%:=0 to len(arr[0][][0])-1 do 'loop through array
+        for y%:=0 to len(arr[0][0][])-1 do 'loop through array
+            arr[z%][x%][y%]:=0;
+        next;        
+    next;    
+next;
+
+end;
