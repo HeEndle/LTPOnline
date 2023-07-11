@@ -12,9 +12,10 @@ Proc Versions()
 '           - Channel select dialog allows to select multiple response channels
 '1.51b   - fixed a bug that would crash the script when analyzing files where only higher FrameStates or Channels where used (e.g. Ch2 and State 2 but not Ch1 and State 1)
 '1.52b   - fixed online sampling
+'1.53b   - fixed Analysis taking the wrong amounts of frames for averages, changes to SamplingInterval
 end;
 '---------------------------Global Variable Declarations-----------------------------
-var LTPOnlineVersion$:="1.52b";    'Script Version
+var LTPOnlineVersion$:="1.53b";    'Script Version
 var SampleStates%:=SampleStates(); 'stores the number of frame states (number of stimulation Channels)
 var FrameStates%[0];               'stores the frame states as a list
 '------------View and Channel handles--------
@@ -38,7 +39,7 @@ var ModeStr$[]:={"Idle","Scanning File","Input/Output","Baseline","LTP induction
 var Mode%:=0;                               'flag for recording mode (index of ModeStr$)
 var manualCursorMap%[SampleStates%][2];     'flags (one for each frame state) for modules that set cursors manually
 '---------------Recording Parameters-----------
-var SamplingInterval:=15;     'Stores the samplinginterval in s
+var SamplingInterval[SampleStates%];     'Stores the samplinginterval in s
 var XTick:=60;                'Stores x-axis tick length in s
 '------------Response detection settings--------------------
 '------------Modules---------------------------
@@ -197,6 +198,7 @@ if SampleStatus() = -1 then
     if not samplingFile% then    'if no file is opened by the script, display fileopen dialog
         samplingFile%:= FileOpen("",0,1);    'display file open dialog
         SampleStates%:=GetFileFrameStateList%(FrameStates%);   'set number of frame states from File
+        GetSampleInterval(); 'get sample intervals from file
         createMap%(manualCursorMap%,FrameStates%);  'create a map containing all frame states as keys and all values set to 0
         resize CursorPositions[SampleStates%][][];  'resize array to store cursor positions for all frame states
         CursorDelete(-1);   'clear all existing cursors
@@ -269,9 +271,10 @@ DlgSlider(dlgItem%,"Average for analysis in minutes",1,10,1,5,0,dlgElement%);
 dlgItem%+=1;
 dlgElement%+=1;
 
-DlgGroup("Script Module Versions",0,dlgElement%,0,3);
+DlgGroup("Script Module Versions",0,dlgElement%,0,5);
 dlgElement%+=1;
-DlgText("LTP Online Script Version: "+LTPOnlineVersion$+"\nResponse Detection Version: "+libLTPCursorVersion$+"\nAnalysis Tools Version: "+libAnalysisToolsVersion$,0,dlgElement%);
+DlgText("LTP Online Script Version: "+LTPOnlineVersion$+"\nResponse Detection Version: "+libLTPCursorVersion$+"\nAnalysis Tools Version: "
++libAnalysisToolsVersion$+"\nFile Handling Version: "+libFileHandlingVersion$+"\nArray Maps Version: "+libArrayMapVersion$,0,dlgElement%);
 
 DlgAllow(0,0,SettingsChanged%);
 dlgResult%:=DlgShow(currentDetectionModule%,high%,low%,lowpass,currentIOModule%,average);
@@ -298,7 +301,7 @@ end;
 Func LoadConfigBtn%()       'Settings dialog button to load custom config files
 '---local variables---
 var currentview%:=View();   'save current view
-var config%:= FileOpen("",1,0,"open MiniMonster configuration file");
+var config%:= FileOpen("",1,0,"open LTPOnline configuration file");
 '---------------------
 View(currentview%);
 
@@ -320,7 +323,7 @@ Func SaveConfigBtn%()       'Settings dialog button to save custom config files
 var currentview%:=View();   'save current view
 var config%:= FileNew(1);
 '---------------------
-FileSaveAs("",0,"Save MiniMonster configuration file");
+FileSaveAs("",0,"Save LTPOnline configuration file");
 
 View(currentview%);
 
@@ -440,9 +443,10 @@ Proc UpdateToolbarText()    'Update the Text on the toolbar according to current
 end;
 Func averageTrace()         'Create averages of the original trace separated by frame states
 
-var n%;
-var i%;
-var framesPerAvg%:=average*(60/SamplingInterval);
+var n%; 'outer counter
+var i%; 'inner counter
+var TotalInterval:=Trunc(ArrSum(SamplingInterval));
+var framesPerAvg%:=average*(60/TotalInterval);
 view (samplingFile%);   'set view to the original Trace
 resize avgdata%[SampleStates%*len(ch%[])];   'fit arry size to number of frame states and channels
 
@@ -454,7 +458,7 @@ for n%:=0 to len(ch%[])-1 do
         WindowVisible(1);       'display it
         ProcessFrames(-1,-1,i%,0,1,1,0,1);    'Process Frame state n%+1
         Window(0,(100/(SampleStates%*len(ch%[])))*((n%*SampleStates%)+i%-1),50,(100/(SampleStates%*len(ch%[])))*((n%*SampleStates%)+i%));	    'And display to the top left of screen
-        WindowTitle$("Ch"+Str$(n%+1)+" State"+Str$(i%)+" "+Str$(Trunc(framesPerAvg%)*SamplingInterval)+" s average - "+Str$(Trunc(average*(60/SamplingInterval)))+" frames");
+        WindowTitle$("Ch"+Str$(n%+1)+" State"+Str$(i%)+" "+Str$(Trunc(framesPerAvg%)*TotalInterval)+" s average - "+Str$(Trunc(framesPerAvg%))+" frames");
         'LTPCursorSet(avgdata%[0][0],1,1,high%,low%);
     next;
 next;    
@@ -484,7 +488,7 @@ var unitsX$;    'store units of x-axis
 
 XYJoin(1,0);                'no joining lines between points
 XYKey(1,1);                 'show key
-XAxisStyle(0,Xseconds%/SamplingInterval,1);          'Set up X axis ticks major ticks every minute with 4 subticks
+XAxisStyle(0,Xseconds%/4,1);          'Set up X axis ticks major ticks every minute with 4 subticks
 
 docase                      'set up unit names
     case Xseconds% = 3600 then unitsX$:="h";
@@ -536,7 +540,9 @@ var currentFrameState%:=View(samplingFile%).FrameState(lastFrame%+1); 'get Frame
 var currentXYchan%:=((chan%-1)*GetArrMaxValue%(FrameStates%))+currentFrameState%-((GetArrMaxValue%(FrameStates%)*GetArrMaxValue%(ch%))-(len(FrameStates%)*len(ch%)));
 'var currentXYchan%:=((ch%-1)*SampleStates%)+currentFrameState%;
 
-var x:=(lastFrame%*SamplingInterval)/XTick;    'get position on x-axis
+Frame(lastFrame%) 'set latest frame as current frame
+var FrameTime:=FrameAbsStart(); 'get start time of frame
+var x:=FrameTime/XTick;    'get position on x-axis
 var amp:=ChanValue(chan%,Cursor(6))-ChanValue(chan%,Cursor(4)); 'get amplitude
 var slope:=ChanMeasure(chan%,3,Cursor(8),Cursor(7));  'get slope
 
@@ -575,7 +581,7 @@ For n%:=1 to FrameCount() do                    'loop through all frames
     if doubling% <>1 then                       'if the current frame state has not been on the list
         states%[samplestates%]:=FrameState(-2); 'put it on the list after last entry
         samplestates%+=1;                       'increase the count of framestates by 1                      
-        doubling%:=0;                           'reset flag for nex loop run
+        doubling%:=0;                           'reset flag for next loop run
     endif;    
 next;
 
@@ -625,6 +631,36 @@ for n%:=1 to len(allStates%) do 'loop through array and write Sample states
 next;
 
 return;
+end;
+Func GetSampleInterval()    'get the intervals between frame states
+
+resize SamplingInterval[SampleStates%];
+var n%;                 'counter
+
+if SampleStatus() = -1 then
+    var CurrentFrameState%; 'save current frame state
+    var CurrentFrameTime;   'save time of current frame
+    var NextFrameTime;      'save time of next frame
+    var IntervalsSet%;      'counter for how often a new interval has been saved    
+
+    For n%:=1 to FrameCount() do
+        frame(n%+1);
+        NextFrameTime:=FrameAbsStart(); 'get sart time of the next frame
+        frame(n%);
+        CurrentFrameState%:=FrameState(-2); 'get the current frame state
+        CurrentFrameTime:=FrameAbsStart();  'get start time of current frame
+        if SamplingInterval[CurrentFrameState%-1] = 0 then    'if there is no interval saved for the current frame state save one
+            SamplingInterval[CurrentFrameState%-1]:=NextFrameTime-CurrentFrameTime;   'save interval
+            IntervalsSet%+=1;   'mark that an interval has been saved
+        endif;
+        if IntervalsSet% = SampleStates% then break endif;  'end if an interval has been saved for every frame state
+    next
+else    'if sampling is running get sample interval information from sample config for fixed intervals
+    For n%:=1 to SampleStates% do
+        SamplingInterval[n%]:=SampleFixedInt(n%);
+    next;
+endif;
+
 end;
 Proc ReadConfig(view%:=-1)   'Read config file and load values stored in it then close config
 '---local variables---
