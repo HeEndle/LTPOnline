@@ -8,12 +8,13 @@ Proc Versions()
 '1.41b   - Added saving cursor positions for each frame state
 '1.42b   - Added button to load config files
 '        - Added button to save config files
-'1.5     - multiple response channels:
+'1.5b    - multiple response channels:
 '           - Channel select dialog allows to select multiple response channels
-'1.51    - fixed a bug that would crash the script when analyzing files where only higher FrameStates or Channels where used (e.g. Ch2 and State 2 but not Ch1 and State 1)
+'1.51b   - fixed a bug that would crash the script when analyzing files where only higher FrameStates or Channels where used (e.g. Ch2 and State 2 but not Ch1 and State 1)
+'1.52b   - fixed online sampling
 end;
 '---------------------------Global Variable Declarations-----------------------------
-var LTPOnlineVersion$:="1.51b";    'Script Version
+var LTPOnlineVersion$:="1.52b";    'Script Version
 var SampleStates%:=SampleStates(); 'stores the number of frame states (number of stimulation Channels)
 var FrameStates%[0];               'stores the frame states as a list
 '------------View and Channel handles--------
@@ -136,6 +137,8 @@ Func Quit%()                'Button 1 to quit script
 return 0; ' Return zero to exit Toolbar()
 end;
 Func Start%()               'Button 2 START SAMPLING routine
+samplingFile%:=FileNew(0,1);    'create new file according to sampling config
+Window(0,0,50,100); 'And display on the left side of the screen
 
 'ch%:=ChanSelectDlg(samplingFile%);
 ChSelectMultiple(samplingFile%);
@@ -146,6 +149,7 @@ resize CursorPositions[SampleStates%][][];      'resize array to store cursor po
 SampleStart();
 recstate$:="RECORDING";
 UpdateToolbarText();
+SetUpWorkspace();
 return 1;                   'This leaves toolbar active
 end;
 
@@ -438,18 +442,19 @@ Func averageTrace()         'Create averages of the original trace separated by 
 
 var n%;
 var i%;
+var framesPerAvg%:=average*(60/SamplingInterval);
 view (samplingFile%);   'set view to the original Trace
 resize avgdata%[SampleStates%*len(ch%[])];   'fit arry size to number of frame states and channels
 
 for n%:=0 to len(ch%[])-1 do
     for i%:=1 to SampleStates% do
         view (samplingFile%);   'set view to the original Trace        
-        avgdata%[(n%*SampleStates%)+i%-1]:=SetAutoAv(ch%[n%],average*(60/SamplingInterval),average*(60/SamplingInterval));  'Average every x Frames
+        avgdata%[(n%*SampleStates%)+i%-1]:=SetAutoAv(ch%[n%],framesPerAvg%,framesPerAvg%);  'Average every x Frames
         'avgdata%[1][n%]:=1;     'set channel to one as there is only one channel after splitting frame states
         WindowVisible(1);       'display it
         ProcessFrames(-1,-1,i%,0,1,1,0,1);    'Process Frame state n%+1
         Window(0,(100/(SampleStates%*len(ch%[])))*((n%*SampleStates%)+i%-1),50,(100/(SampleStates%*len(ch%[])))*((n%*SampleStates%)+i%));	    'And display to the top left of screen
-        WindowTitle$("Ch"+Str$(n%+1)+" State"+Str$(i%)+" "+Str$(Trunc(average*(60/SamplingInterval))*SamplingInterval)+" s average - "+Str$(Trunc(average*(60/SamplingInterval)))+" frames");
+        WindowTitle$("Ch"+Str$(n%+1)+" State"+Str$(i%)+" "+Str$(Trunc(framesPerAvg%)*SamplingInterval)+" s average - "+Str$(Trunc(average*(60/SamplingInterval)))+" frames");
         'LTPCursorSet(avgdata%[0][0],1,1,high%,low%);
     next;
 next;    
