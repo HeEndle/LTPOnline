@@ -10,9 +10,10 @@ Proc Versions()
 '        - Added button to save config files
 '1.5     - multiple response channels:
 '           - Channel select dialog allows to select multiple response channels
+'1.51    - fixed a bug that would crash the script when analyzing files where only higher FrameStates or Channels where used (e.g. Ch2 and State 2 but not Ch1 and State 1)
 end;
 '---------------------------Global Variable Declarations-----------------------------
-var LTPOnlineVersion$:="1.5b";    'Script Version
+var LTPOnlineVersion$:="1.51b";    'Script Version
 var SampleStates%:=SampleStates(); 'stores the number of frame states (number of stimulation Channels)
 var FrameStates%[0];               'stores the frame states as a list
 '------------View and Channel handles--------
@@ -459,7 +460,7 @@ end;
 Proc SetUpWorkspace()       'Set up the workspacewindows and plots
 
 View(samplingFile%)
-var YUnit$:=ChanUnits$(ch%);
+var YUnit$:=ChanUnits$(ch%[0]);
 var XUnit$:=XUnits$();
 
 FVPlot%:=MakePlot(XTick,YUnit$,"Fiber Volley",50,0,100,33);
@@ -523,14 +524,16 @@ next;
 
 View(oldview%);
 end;
-Proc plotDataFrame(ch%)     'plot data from current frame
+Proc plotDataFrame(chan%)     'plot data from current frame
 
 View(samplingFile%);
 var currentFrameState%:=View(samplingFile%).FrameState(lastFrame%+1); 'get Frame state of currently analyzed frame
-var currentXYchan%:=((ch%-1)*SampleStates%)+currentFrameState%;
+var currentXYchan%:=((chan%-1)*GetArrMaxValue%(FrameStates%))+currentFrameState%-((GetArrMaxValue%(FrameStates%)*GetArrMaxValue%(ch%))-(len(FrameStates%)*len(ch%)));
+'var currentXYchan%:=((ch%-1)*SampleStates%)+currentFrameState%;
+
 var x:=(lastFrame%*SamplingInterval)/XTick;    'get position on x-axis
-var amp:=ChanValue(ch%,Cursor(6))-ChanValue(ch%,Cursor(4)); 'get amplitude
-var slope:=ChanMeasure(ch%,3,Cursor(8),Cursor(7));  'get slope
+var amp:=ChanValue(chan%,Cursor(6))-ChanValue(chan%,Cursor(4)); 'get amplitude
+var slope:=ChanMeasure(chan%,3,Cursor(8),Cursor(7));  'get slope
 
 if lowpass = 0 then 'if there is no amplitude filter set
     View(ampPlot%).XYAddData(currentXYchan%,x,amp); 'plot amplitude
@@ -680,4 +683,9 @@ WriteConfigEntry(config%,"Average",Str$(average));
 View(config%);
 FileClose(0,-1); 'Close config file
 View(currentview%); 'return to current view
+end;
+Func GetArrMaxValue%(arr%[]) 'Returns the highest value in an integer array
+
+return arr%[Max(arr%[])];
+
 end;
