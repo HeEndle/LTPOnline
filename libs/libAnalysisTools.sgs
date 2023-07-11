@@ -3,53 +3,57 @@
 '1.01: 27.11.2015 - set array size for x and y dynamically to get all the points. Now supports more than 50 Datapoint in Channel 2
 '1.02: 14.03.2016 - runs for every additional Channel once. Added loop, removed statically assumtion of 2 Channels
 '1.03: 18.05.2016 - 
-'2.0: 14.08.2020  - rewrote 
+'2.0:  14.08.2020 - rewrote
+'2.1:  10.12.2021 - adjustments for multiple recording channels (LTPonline v1.5)
 '---------------------------Global Variable Declarations-----------------------------
-var libAnalysisToolsVersion$:="2.0";
+var libAnalysisToolsVersion$:="2.1";
 '------------------------------------------------------------------------------------
 
-'generates plots offline from views. views must be in format view%[0][] = views; view%[][0] = channel. Returns viewhanlde of generated plot. mode% = 1 for amplitude mode% = 2 for slope
-Func offlinePlot(viewArr%[][],mode%,topLeftX,topLeftY,bottomRightX,bottomRightY)   
+'generates plots offline from views. views must be in format view%[] = views. Returns viewhandle of generated plot. mode% = 1 for amplitude mode% = 2 for slope
+Func offlinePlot(viewArr%[],mode%,topLeftX,topLeftY,bottomRightX,bottomRightY)   
 
 var n%; 'counter
 var longest%;   'stores frame number of longest view
-var rgb:=1.0/len(viewArr%[0][]);    'used to set channel color in greyscale
+var rgb:=1.0/len(viewArr%[]);    'used to set channel color in greyscale
 var plot%:=FileNew(12);   'create XY view
 var plotStateN%; 'stores plot of current frame state
+var XUnit$:=View(viewArr%[0]).XUnits$(); 
+var YUnit$:=View(viewArr%[0]).ChanUnits$(1);
+var indexstart%:=View(viewArr%[0]).InStr(WindowTitle$()," ",InStr(WindowTitle$(),"State")); 'the index of the first space character following the state number in channel 1 window title
+var indexend%:=View(viewArr%[0]).InStr(WindowTitle$()," ",indexstart%+1); 'the index of the next space character (after the amount of seconds to average)
 var x[0];   'array to temporarily store x coordinates from a frame state
 var y[0];   'array to temporarily store y coordinates from a frame state
 
-for n%:=2 to len(viewArr%[0][]) do   'create number of channel according to number of views
+for n%:=2 to len(viewArr%[]) do   'create number of channel according to number of views
     View(plot%).XYSetChan(0);        'create new channel
 next
     
-for n%:=0 to len(viewArr%[0][])-1 do
+for n%:=0 to len(viewArr%[])-1 do
     
-    View(viewArr%[0][n%]);       'set view to next file view
+    View(viewArr%[n%]);       'set view to next file view
     plotStateN%:=MeasureToXY(0); 'create temporary XY view    
     
     docase 
     case mode% = 1 then 'if mode is amplitude
-        MeasureX(104,viewArr%[1][n%]);  'freame number
-        MeasureY(101,viewArr%[1][n%],"Cursor(6)","Cursor(2)");  'Value Difference
-        WindowTitle$("Ampliude of response");   'set window title
+        MeasureX(104,1);  'freame number
+        MeasureY(101,1,"Cursor(6)","Cursor(2)");  'Value Difference        
     case mode% = 2 then 'if mode is slope
-        MeasureX(104,viewArr%[1][n%],"0",0,MaxTime());  'frame number
-        MeasureY(3,viewArr%[1][n%],"Cursor(8)","Cursor(7)");    'slope
-        WindowTitle$("Initial slope");   'set window title     
+        MeasureX(104,1,"0",0,MaxTime());  'frame number
+        MeasureY(3,1,"Cursor(8)","Cursor(7)");    'slope           
     endcase
     
     MeasureChan(1,"Amp.");
     ProcessFrames(1,-1,-1,0,1,1);	'Process all frames
     resize x[XYCount(1)];           'set size of array to number of data points
-    resize y[XYCount(1)];           ''set size of array to number of data points
+    resize y[XYCount(1)];           'set size of array to number of data points
     XYGetData(1,x,y);               'get date from temporary plot channel 1 and save it in x and y
     FileClose(0,-1);                'close temporary plot
         
     View(plot%);        
     XYAddData(n%+1,x,y);            'add data to channel according to view
     XYJoin(n%+1,1);	                'Join the dots
-    ChanColourSet(n%+1,1,n%*rgb,n%*rgb,n%*rgb); 'set channel color in greyscale   
+    ChanColourSet(n%+1,1,n%*rgb,n%*rgb,n%*rgb); 'set channel color in greyscale
+    ChanTitle$(n%+1,View(viewArr%[n%]).DelStr$(WindowTitle$(),InStr(WindowTitle$()," ",InStr(WindowTitle$(),"State")),99999));
     
     if longest% < len(x) then
         longest%:=len(x);
@@ -59,6 +63,14 @@ next;
 
 View(plot%);
 Window(topLeftX,topLeftY,bottomRightX,bottomRightY);    'set window position
+docase 
+case mode% = 1 then 'if mode is amplitude
+        WindowTitle$("Ampliude of response - average of"+View(viewArr%[0]).mid$(WindowTitle$(),indexstart%,indexend%-indexstart%)+" s");   'set window title
+        ChanUnits$(1,YUnit$);                   'set Y axis unit
+    case mode% = 2 then 'if mode is slope
+        WindowTitle$("Initial slope - average of"+View(viewArr%[0]).mid$(WindowTitle$(),indexstart%,indexend%-indexstart%)+" s");          'set window title
+        ChanUnits$(1, YUnit$+"/"+XUnit$);
+endcase;
 WindowVisible(1);	'Make visible
 XYKey(1,1);		    'Show the key
 XRange(0,longest%+1);

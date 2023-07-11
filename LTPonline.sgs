@@ -8,20 +8,22 @@ Proc Versions()
 '1.41b   - Added saving cursor positions for each frame state
 '1.42b   - Added button to load config files
 '        - Added button to save config files
+'1.5     - multiple response channels:
+'           - Channel select dialog allows to select multiple response channels
 end;
 '---------------------------Global Variable Declarations-----------------------------
-var LTPOnlineVersion$:="1.42b";    'Script Version
+var LTPOnlineVersion$:="1.5b";    'Script Version
 var SampleStates%:=SampleStates(); 'stores the number of frame states (number of stimulation Channels)
 var FrameStates%[0];               'stores the frame states as a list
 '------------View and Channel handles--------
 var configFile%;          'handle for config file
 var samplingFile%;        'view handle for the currend sampling file
-var ch%;                  'response channel
+var ch%[0];               'response channel
 var lastFrame%;           'last processed frame of samplingFile
 var slopePlot%;           'view handle for online plot of Slope
 var ampPlot%;             'view handle for online plot of amplitude
 var FVPlot%;              'view handle for online plot of Fiber Volley
-var avgdata%[2][SampleStates%];       'View handle of averaged data [0][] contains the views [1][] contains the channels
+var avgdata%[SampleStates%*len(ch%)];       'contains view handles of averaged data
 '----------------Dialog handles--------------
 var dlgTextIO%;           'stores item numbers IO-Module Explanation Dlg text
 '--------------Cursor Positions--------------
@@ -102,6 +104,7 @@ end;
 Func idle%()                'Idle function. Called when script idles
 
 var f%;  'frame count
+var n%;  'loop counter
 
 if samplingFile% <> 0 then  'if there is an open file to work on
     view (samplingFile%);   'make the data window current view
@@ -111,9 +114,12 @@ if samplingFile% <> 0 then  'if there is an open file to work on
         
         Frame(lastFrame%+1);    'Go to next unprocessed frame
         UpdateToolbarText();
-        LTPSetCursor(samplingFile%,ch%,high%,low%,0);
-        plotDataFrame();
         
+        for n%:=0 to len(ch%)-1 do  'loop through analysis channels
+            LTPSetCursor(samplingFile%,ch%[n%],high%,low%,0);   'setup cursors for each channel
+            plotDataFrame(ch%[n%]);
+        next;     
+                
         if Mode% = 2 then       'if IO mode is turned on
             IOCurve(currentIOModule%,f%,SampleStates%);
         endif;
@@ -130,7 +136,8 @@ return 0; ' Return zero to exit Toolbar()
 end;
 Func Start%()               'Button 2 START SAMPLING routine
 
-ch%:=ChanSelectDlg(samplingFile%);
+'ch%:=ChanSelectDlg(samplingFile%);
+ChSelectMultiple(samplingFile%);
 SampleStates%:=SampleStates();
 getSampleStateList%(FrameStates%);              'get list of frame states from File
 createMap%(manualCursorMap%,FrameStates%);      'create a map containing all frame states as keys and all values set to 0
@@ -166,10 +173,10 @@ samplingFile%:= FileOpen("",0,1);    'display file open dialog
 SampleStates%:=GetFileFrameStateList%(FrameStates%); 'get number of frame states from File
 createMap%(manualCursorMap%,FrameStates%); 'create a map containing all frame states as keys and all values set to 0
 resize CursorPositions[SampleStates%][][];  'resize array to store cursor positions for all frame states
-resize avgdata%[][SampleStates%];   'fit arry size to number of frame states
 CursorDelete(-1);   'clear all existing cursors
 Window(0,0,50,100); 'And display on the left side of the screen
-ch%:=ChanSelectDlg(samplingFile%); 'Diplay channel selection dialog
+'ch%:=ChanSelectDlg(samplingFile%); 'Diplay channel selection dialog
+ChSelectMultiple(samplingFile%);
 Mode%:= 1; 'flag as rescan
 recstate$:="SCANNING FILE";
 UpdateToolbarText();
@@ -187,17 +194,17 @@ if SampleStatus() = -1 then
         SampleStates%:=GetFileFrameStateList%(FrameStates%);   'set number of frame states from File
         createMap%(manualCursorMap%,FrameStates%);  'create a map containing all frame states as keys and all values set to 0
         resize CursorPositions[SampleStates%][][];  'resize array to store cursor positions for all frame states
-        resize avgdata%[][SampleStates%];       'fit arry size to number of frame states
         CursorDelete(-1);   'clear all existing cursors
         Window(0,0,50,100); 'And display on the left side of the screen
-        ch%:=ChanSelectDlg(samplingFile%); 'Diplay channel selection dialog
+        'ch%:=ChanSelectDlg(samplingFile%); 'Diplay channel selection dialog
+        ChSelectMultiple(samplingFile%);
         lastFrame%:=View(samplingFile%).FrameCount();   'flag frames as already processed
     endif    
     
     averageTrace();
     
-    for n%:=0 to len(avgdata%[0][])-1 do    'set the cursors in the newly created average views
-        LTPSetCursor(avgdata%[0][n%],1,high%,low%,1);  'allow user to correct the cursor positions if necessary
+    for n%:=0 to len(avgdata%)-1 do    'set the cursors in the newly created average views
+        LTPSetCursor(avgdata%[n%],1,high%,low%,1);  'allow user to correct the cursor positions if necessary
     next;
     
     offlinePlot(avgdata%,1,50,0,100,50);
@@ -361,23 +368,89 @@ if ok% = 0 then Halt; endif;		'..and we quit if user cancels
 Optimise(ch%);		'Optimise the response data
 return ch%;
 end;
+Func ChSelectMultiple(view%,channels%:=1) 'create a dialog to select multiple channels from
+'---variable declaration---
+var ok%;
+var n%;
+var itemnr%:=1;
+var buttonnr%:=3;
+'--------------------------
+View(view%);
+resize ch%[channels%];
+
+DlgCreate("Select Channel for Measurements",0,0,65);
+
+for n%:=1 to channels% do
+
+    DlgChan(itemnr%,50,1,3,itemnr%);
+    DlgButton(buttonnr%,"Delete",DeleteChDlg%,54,itemnr%);
+    itemnr%+=1;
+    buttonnr%+=1;
+
+next;
+
+DlgButton(2,"+", AddChDlg%,1.5,itemnr%);
+
+ok%:= DlgShow(ch%);					'User selects response channel
+
+docase
+case ok% = 0 then
+    halt;                           '..and we quit if user cancels
+case ok% = -2 then
+    channels%+=1;
+    ChSelectMultiple(view%,channels%);
+case ok% < -2 then
+    channels%-=1;
+    ChSelectMultiple(view%,channels%);
+endcase;
+
+return 1;
+end;
+Func AddChDlg%()            'Button function to add a channel to the dialog
+var n%;
+
+for n%:=0 to len(ch%)-1 do
+    ch%[n%]:=DlgValue(n%+1);
+next;
+
+return -2;
+end;
+Func DeleteChDlg%()         'Button function to delete a channel from the dialog
+var buttonnr%:=DlgButton();
+var n%;
+var i%;
+
+for n%:=0 to len(ch%)-1 do
+    if n% = buttonnr%-3 then
+        i%+=1;
+    else        
+        ch%[n%-i%]:=DlgValue(n%+1);
+    endif;    
+next;
+
+return -buttonnr%;
+end;
 Proc UpdateToolbarText()    'Update the Text on the toolbar according to current recording
     ToolbarText("LTP Online Script Version: "+LTPOnlineVersion$+" | Recording Status: "+recstate$+" | Current Frame: "+Str$(lastFrame%+1)+" | Frame State: "+Str$(FrameState(lastFrame%+1))+" | Mode: "+ModeStr$[Mode%]);
 end;
-
 Func averageTrace()         'Create averages of the original trace separated by frame states
 
 var n%;
+var i%;
 view (samplingFile%);   'set view to the original Trace
+resize avgdata%[SampleStates%*len(ch%[])];   'fit arry size to number of frame states and channels
 
-for n%:=0 to len(avgdata%[0][])-1 do
-    view (samplingFile%);   'set view to the original Trace    
-    avgdata%[0][n%]:=SetAutoAv(ch%,average*(60/SamplingInterval),average*(60/SamplingInterval));  'Average every x Frames
-    avgdata%[1][n%]:=1;     'set channel to one as there is only one channel after splitting frame states
-    WindowVisible(1);       'display it
-    ProcessFrames(-1,-1,n%+1,0,1,1,0,1);    'Process Frame state n%+1
-    Window(0,(100/SampleStates%)*n%,50,(100/SampleStates%)*(n%+1));	    'And display to the top left of screen
-    'LTPCursorSet(avgdata%[0][0],1,1,high%,low%);
+for n%:=0 to len(ch%[])-1 do
+    for i%:=1 to SampleStates% do
+        view (samplingFile%);   'set view to the original Trace        
+        avgdata%[(n%*SampleStates%)+i%-1]:=SetAutoAv(ch%[n%],average*(60/SamplingInterval),average*(60/SamplingInterval));  'Average every x Frames
+        'avgdata%[1][n%]:=1;     'set channel to one as there is only one channel after splitting frame states
+        WindowVisible(1);       'display it
+        ProcessFrames(-1,-1,i%,0,1,1,0,1);    'Process Frame state n%+1
+        Window(0,(100/(SampleStates%*len(ch%[])))*((n%*SampleStates%)+i%-1),50,(100/(SampleStates%*len(ch%[])))*((n%*SampleStates%)+i%));	    'And display to the top left of screen
+        WindowTitle$("Ch"+Str$(n%+1)+" State"+Str$(i%)+" "+Str$(Trunc(average*(60/SamplingInterval))*SamplingInterval)+" s average - "+Str$(Trunc(average*(60/SamplingInterval)))+" frames");
+        'LTPCursorSet(avgdata%[0][0],1,1,high%,low%);
+    next;
 next;    
     
 return;
@@ -398,7 +471,7 @@ end;
 Func MakePlot(Xseconds%,unitsY$,title$,topLeftX,topLeftY,bottomRightX,bottomRightY)   'Create XY Plot
 
 var plot%:=FileNew(12);      'create XY view
-var rgb:=1.0/SampleStates%;    'used to set channel color in greyscale
+var rgb:=1.0/(SampleStates% * len(ch%));    'used to set channel color in greyscale
 var n%;         'counter
 var unitsX$;    'store units of x-axis
 
@@ -416,7 +489,7 @@ endcase
 
 ChanColourSet(1,1,0,0,0); 'set channel 1 to black
 
-for n%:= 2 to SampleStates% do    
+for n%:= 2 to SampleStates% * len(ch%) do    
     XYSetChan(0);  'set up additional channels for every frame state
     ChanColourSet(n%,1,(n%-1)*rgb,(n%-1)*rgb,(n%-1)*rgb); 'set channel color in greyscale
 next;
@@ -426,28 +499,46 @@ XUnits$(unitsX$);           'set X axis units
 ChanUnits$(1,unitsY$);      'set Y axis units
 WindowTitle$(title$);       'Set window title
 
+NameXYChannels(plot%);
+
 WindowVisible(1);	        'Make it visible
 Window(topLeftX,topLeftY,bottomRightX,bottomRightY);	    'And display it in position
 
 
 return plot%;
 end;
+Proc NameXYChannels(plot%)  'Applies Channel names to XY View channels according to channels and frame states
+var oldview%:=View();   'store current view
+View(plot%);            'set view to the XY view passed
 
-Proc plotDataFrame()        'plot data from current frame
+var channels%:=ChanCount(); 'number of channels in XY view
+var n%; 'loop counter
+var i%; 'loop counter
+
+for n%:=1 to channels%/SampleStates% do 'loop through channels
+    for i%:=1 to SampleStates% do       'lopp through frame states per channel
+        ChanTitle$(((n%-1)*SampleStates%)+i%,"Ch"+Str$(n%)+" State"+Str$(i%)+" - "+View(samplingFile%).ChanTitle$(n%));
+    next;    
+next;
+
+View(oldview%);
+end;
+Proc plotDataFrame(ch%)     'plot data from current frame
 
 View(samplingFile%);
 var currentFrameState%:=View(samplingFile%).FrameState(lastFrame%+1); 'get Frame state of currently analyzed frame
+var currentXYchan%:=((ch%-1)*SampleStates%)+currentFrameState%;
 var x:=(lastFrame%*SamplingInterval)/XTick;    'get position on x-axis
 var amp:=ChanValue(ch%,Cursor(6))-ChanValue(ch%,Cursor(4)); 'get amplitude
 var slope:=ChanMeasure(ch%,3,Cursor(8),Cursor(7));  'get slope
 
 if lowpass = 0 then 'if there is no amplitude filter set
-    View(ampPlot%).XYAddData(currentFrameState%,x,amp); 'plot amplitude
-    View(slopePlot%).XYAddData(currentFrameState%,x,slope); 'plot slope
+    View(ampPlot%).XYAddData(currentXYchan%,x,amp); 'plot amplitude
+    View(slopePlot%).XYAddData(currentXYchan%,x,slope); 'plot slope
 else
     if Abs(amp)<lowpass then    'check if amplitude is bigger then threshold
-        View(ampPlot%).XYAddData(currentFrameState%,x,amp); 'plot amplitude
-        View(slopePlot%).XYAddData(currentFrameState%,x,slope); 'plot slope       
+        View(ampPlot%).XYAddData(currentXYchan%,x,amp); 'plot amplitude
+        View(slopePlot%).XYAddData(currentXYchan%,x,slope); 'plot slope       
     endif;    
 endif;
 
