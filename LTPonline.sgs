@@ -1,0 +1,442 @@
+'LTPOnline
+'Script written by Heiko Endle, Universitätsmedizin Mainz, Germany.
+Proc Versions()
+'------------------------------------Changelog---------------------------------------
+'LTPOnline Script Versions
+'1.4b    - Refactored new LTPOnline Script
+end;
+'---------------------------Global Variable Declarations-----------------------------
+var LTPOnlineVersion$:="1.4b";    'Script Version
+var SampleStates%:=SampleStates(); 'stores the number of frame states (number of stimulation Channels)
+'------------View and Channel handles--------
+var configFile%;          'handle for config file
+var samplingFile%;        'view handle for the currend sampling file
+var ch%;                  'response channel
+var lastFrame%;           'last processed frame of samplingFile
+var slopePlot%;           'view handle for online plot of Slope
+var ampPlot%;             'view handle for online plot of amplitude
+var FVPlot%;              'view handle for online plot of Fiber Volley
+var avgdata%[2][SampleStates%];       'View handle of averaged data [0][] contains the views [1][] contains the channels
+'------------View and Channel handles----------
+var dlgTextIO%;           'stores item numbers IO-Module Explanation Dlg text
+'-----------------Flags------------------------
+'---State strings for display---
+var recstate$:="STOPPED";            'stores recording state as String for display to user
+var ModeStr$[]:={"Idle","Scanning File","Input/Output","Baseline","LTP"};           'Mode as string for display to user
+'---Internal flags--------------
+var Mode%:=0;             'flag for recording mode (index of ModeStr$)
+'---------------Recording Parameters-----------
+var SamplingInterval:=15;     'Stores the samplinginterval in s
+var XTick:=60;            'Stores x-axis tick length in s
+'------------Response detection settings--------------------
+'------------Modules---------------------------
+var currentDetectionModule%; 'stores currently selected detection module as index of detectionModules$
+var detectionModules$[]:={"Auto v1.39"};
+var currentIOModule%;        'stores currently selected IO module as index of detectionModules$
+var IOModules$[]:={"I/O Manual v1.39"};
+var IOModulesExplanation$[]:={"IO Curve 1V to 9V, 2V-6V in triple replicates"};
+'------------Variables-------------------------
+var high%:=90;            'high percent of slope (eg. 90)
+var low%:=10;             'low percent of slope (eg. 10)
+var average:=5;           'Stores the number of minutes to average
+var lowpass:=0;           'Lowpass cutoff value for filtering false detections including artifact
+'------------------------------------------------------------------------------------
+'------------Includes----------------------------------------
+#include "libs/libLTPCursor.sgs"
+#include "libs/libAnalysisTools.sgs"
+#include "libs/libFileHandling.sgs"
+#include "libs/libIOCurve.sgs"
+'------------------------------------------------------------
+
+'---Main Program---
+DoToolbar();
+Halt;
+
+'-----Module Registration----
+'Register your Cursor setter modules here in this function
+Func LTPSetCursor(dataView%, channel%, usercorrect%)
+docase
+    case currentDetectionModule% = 0 then LTPCursorSetv139(dataView%,channel%, usercorrect%);   'Auto v1.39
+    case currentDetectionModule% = 1 then
+    if then
+        LTPCursorSetManual(dataView%,channel%,high%,low%);
+    endif;
+    
+endcase
+return;
+end;
+'Register your IO Curve modules here in this function
+Func IOCurve(curveID%,currentframe%,SampleStates%)
+docase
+    case curveID% = 0 then IO1to9v(currentframe%,SampleStates%);
+endcase
+return;
+end;
+'-----Functions-----
+Func DoToolbar()            'Initialize Toolbar
+ToolbarClear();
+ToolbarSet(0,"", Idle%); 'Define an idle function 
+ToolbarSet(1,"Quit", Quit%);
+ToolbarSet(2, "Start", Start%); 'Link to Start function
+ToolbarSet(3, "Stop Recording", Stop%); 'Link to Stop function
+ToolbarSet(4, "Mode", Modedial%); 'Link to Mode selection Dialog
+ToolbarSet(5, "Rescan", rescan%); 'Link to rescan function
+ToolbarSet(6, "Analyze", Analyze%); 'Link to Analyze function
+ToolbarSet(7, "Settings", Settings%); 'Link to Config function
+return Toolbar("LTP Online Skript Version: "+LTPOnlineVersion$+" | Response Detection Version: "+libLTPCursorVersion$+" | Sample States: "+Str$(SampleStates%), 0);
+end;
+
+
+Func idle%()                'Idle function. Called when script idles
+
+var f%;  'frame count
+
+if samplingFile% <> 0 then  'if there is an open file to work on
+    view (samplingFile%);   'make the data window current view
+    f% := FrameCount();     'get the number of frames in the file
+
+    If ((f% - lastFrame%) >= 1) then 'if we have >= 1 unprocessed sweeps
+        
+        Frame(lastFrame%+1);    'Go to next unprocessed frame
+        UpdateToolbarText();
+        LTPSetCursor(samplingFile%,ch%,0);
+        plotDataFrame();
+        
+        if Mode% = 2 then       'if IO mode is turned on
+            IOCurve(currentIOModule%,f%,SampleStates%);
+        endif;
+        
+        lastFrame%+=1;  'mark frame as processed
+    endif;
+endif;
+
+return 1;
+end;
+
+Func Quit%()                'Button 1 to quit script
+return 0; ' Return zero to exit Toolbar()
+end;
+Func Start%()               'Button 2 START SAMPLING routine
+
+ch%:=ChanSelectDlg(samplingFile%);
+
+SampleStart();
+recstate$:="RECORDING";
+UpdateToolbarText();
+return 1;                   'This leaves toolbar active
+end;
+
+Func Stop%()                'Button 3 STOP SAMPLING routine
+var err%;
+err%:=SampleStop();
+if err% = 0 then
+    recstate$:="STOPPED";
+    UpdateToolbarText();
+endif
+return 1; 'This leaves toolbar active
+end;
+
+Func Modedial%()            'Button 4 for Mode dial
+DlgCreate("Mode select");
+DlgButton(2,"Input-Output",InputOutput%,1,1);
+DlgButton(3,"Record Baseline",Baseline%,1,2);
+DlgButton(4,"Induce LTP",Potentiation%,1,3);
+DlgButton(5,"Record LTP",LTP%,1,4);
+DlgShow();
+return 1;   'This leaves toolbar active
+end;
+
+Func rescan%()              'Button 5 for rescanning files
+samplingFile%:= FileOpen("",0,1);    'display file open dialog
+SampleStates%:=GetFileFrameStates%();
+resize avgdata%[][SampleStates%];
+CursorDelete(-1);   'clear all existing cursors
+Window(0,0,50,100); 'And display on the left side of the screen
+ch%:=ChanSelectDlg(samplingFile%); 'Diplay channel selection dialog
+Mode%:= 1; 'flag as rescan
+recstate$:="SCANNING FILE";
+UpdateToolbarText();
+SetUpWorkspace();
+return 1;
+end
+
+Func Analyze%()             'Button 9 for Analysis
+
+var n%;     'counter
+
+if SampleStatus() = -1 then
+    if not samplingFile% then    'if no file is opened by the script, display fileopen dialog
+        samplingFile%:= FileOpen("",0,1);    'display file open dialog
+        SampleStates%:=GetFileFrameStates%();   'set number of frame states from File
+        resize avgdata%[][SampleStates%];       'fit arry size to number of frame states
+        CursorDelete(-1);   'clear all existing cursors
+        Window(0,0,50,100); 'And display on the left side of the screen
+        ch%:=ChanSelectDlg(samplingFile%); 'Diplay channel selection dialog
+        lastFrame%:=View(samplingFile%).FrameCount();   'flag frames as already processed
+    endif    
+    
+    averageTrace();
+    
+    for n%:=0 to len(avgdata%[0][])-1 do    'set the cursors in the newly created average views
+        LTPSetCursor(avgdata%[0][n%],1,1);  'allow user to correct the cursor positions if necessary
+    next;
+    
+    offlinePlot(avgdata%,1,50,0,100,50);
+    offlinePlot(avgdata%,2,50,50,100,100)
+
+else
+    Message("Error|Analysis can not be used while sampling");
+endif;
+
+
+return 1; 'This leaves toolbar active
+end;
+
+Func Settings%()            'Button 7 for Settings
+
+var dlgElement%:=1;    'iterates element position
+var dlgItem%:=1;       'iterates dialog item number
+
+DlgCreate("LTPOnline Settings");
+
+DlgGroup("Response detection setting",0,dlgElement%,0,4);
+dlgElement%+=1;
+DlgList(dlgItem%,"Detection Module:",detectionModules$,0,0,dlgElement%);
+dlgItem%+=1;
+dlgElement%+=1;
+DlgInteger(dlgItem%,"Slope start in % of Amplitude",0,100,0,dlgElement%);
+dlgItem%+=1;
+dlgElement%+=1;
+DlgInteger(dlgItem%,"Slope end in % of Amplitude",0,100,0,dlgElement%);
+dlgItem%+=1;
+dlgElement%+=1;
+
+DlgGroup("Filter options",0,dlgElement%,0,2);
+dlgElement%+=1;
+DlgReal(dlgItem%,"Ignore responses over (mV amplitude)",0,99,0,dlgElement%,0.1);
+dlgItem%+=1;
+dlgElement%+=1;
+
+DlgGroup("I/O-Curve options",0,dlgElement%,0,3);
+dlgElement%+=1;
+DlgList(dlgItem%,"I/O-Curve Module:",IOModules$,len(IOModules$),0,dlgElement%);
+dlgItem%+=1;
+dlgElement%+=1;
+dlgTextIO%:=DlgText(IOModulesExplanation$[currentIOModule%],0,dlgElement%);
+dlgElement%+=1;
+
+DlgGroup("Analysis Settings",0,dlgElement%,0,2);
+dlgElement%+=1;
+DlgSlider(dlgItem%,"Average for analysis in minutes",1,10,1,5,0,dlgElement%);
+dlgItem%+=1;
+dlgElement%+=1;
+
+DlgGroup("Script Module Versions",0,dlgElement%,0,3);
+dlgElement%+=1;
+DlgText("LTP Online Skript Version: "+LTPOnlineVersion$+"\nResponse Detection Version: "+libLTPCursorVersion$+"\nAnalysis Tools Version: "+libAnalysisToolsVersion$,0,dlgElement%);
+
+DlgAllow(0,0,SettingsChanged%);
+DlgShow(currentDetectionModule%,high%,low%,lowpass,currentIOModule%,average);
+return 1; 'This leaves toolbar active
+end;
+
+Func SettingsChanged%(item%);   'called when user changes setting in dialog
+
+var currentvalue%;  'for storing the current value of integer based dialog items
+
+docase
+case item% = 5 then   'if IO-Curve setting changed
+    currentvalue%:=DlgValue(item%); 'get the current setting of the dropdown list
+    DlgValue$(dlgTextIO%,IOModulesExplanation$[currentvalue%]);   'set the explanation to current selected item
+endcase;
+
+return 1;
+end;
+Func InputOutput%()         'Input-Output curve
+if Mode% <> 2 then
+    Mode%:=2;    
+else
+    Mode%:=0;    
+endif;
+UpdateToolbarText();
+return 1;
+end
+
+Func Baseline%()            'Baseline
+Mode%:=3;
+UpdateToolbarText();
+return 1;
+end;
+Func Potentiation%()        'LTP induction
+Mode%:=4;
+UpdateToolbarText();
+return 1;
+end;
+Func LTP%()                 'LTP recording
+Mode%:=4;
+UpdateToolbarText();
+return 1;
+end;
+Func ChanSelectDlg(view%)   'Displays a channel select dialog
+var ch%;
+var ok%;
+View(view%);
+DlgCreate("Select Channel for Measurements");
+DlgChan(1,"Response channel",1);
+ok%:= DlgShow(ch%);					'User selects response channel
+if ok% = 0 then Halt; endif;		'..and we quit if user cancels
+Optimise(ch%);		'Optimise the response data
+return ch%;
+end;
+Proc UpdateToolbarText()    'Update the Text on the toolbar according to current recording
+    ToolbarText("LTP Online Script Version: "+LTPOnlineVersion$+" | Recording Status: "+recstate$+" | Current Frame: "+Str$(lastFrame%+1)+" | Frame State: "+Str$(FrameState(lastFrame%+1))+" | Mode: "+ModeStr$[Mode%]);
+end;
+
+Func averageTrace()         'Create averages of the original trace separated by frame states
+
+var n%;
+view (samplingFile%);   'set view to the original Trace
+
+for n%:=0 to len(avgdata%[0][])-1 do
+    view (samplingFile%);   'set view to the original Trace    
+    avgdata%[0][n%]:=SetAutoAv(ch%,average*(60/SamplingInterval),average*(60/SamplingInterval));  'Average every x Frames
+    avgdata%[1][n%]:=1;     'set channel to one as there is only one channel after splitting frame states
+    WindowVisible(1);       'display it
+    ProcessFrames(-1,-1,n%+1,0,1,1,0,1);    'Process Frame state n%+1
+    Window(0,(100/SampleStates%)*n%,50,(100/SampleStates%)*(n%+1));	    'And display to the top left of screen
+    'LTPCursorSet(avgdata%[0][0],1,1,high%,low%);
+next;    
+    
+return;
+end;
+
+Proc SetUpWorkspace()       'Set up the workspacewindows and plots
+
+View(samplingFile%)
+var YUnit$:=ChanUnits$(ch%);
+var XUnit$:=XUnits$();
+
+FVPlot%:=MakePlot(XTick,YUnit$,str$(low%)+" to "+str$(high%)+" Slope",50,0,100,33);
+ampPlot%:=MakePlot(XTick,YUnit$,str$(low%)+" to "+str$(high%)+" Slope",50,33,100,66);
+slopePlot%:=MakePlot(XTick,YUnit$+"/"+XUnit$,str$(low%)+" to "+str$(high%)+" Slope",50,66,100,100);
+
+end;
+
+Func MakePlot(Xseconds%,unitsY$,title$,topLeftX,topLeftY,bottomRightX,bottomRightY)   'Create XY Plot
+
+var plot%:=FileNew(12);      'create XY view
+var rgb:=1.0/SampleStates%;    'used to set channel color in greyscale
+var n%;         'counter
+var unitsX$;    'store units of x-axis
+
+
+XYJoin(1,0);                'no joining lines between points
+XYKey(1,1);                 'show key
+XAxisStyle(0,Xseconds%/SamplingInterval,1);          'Set up X axis ticks major ticks every minute with 4 subticks
+
+docase                      'set up unit names
+    case Xseconds% = 3600 then unitsX$:="h";
+    case Xseconds% = 60 then unitsX$:="min";
+    case Xseconds% = 1 then unitsX$:="s";
+    else unitsX$:=str$(Xseconds%)+" s";    
+endcase
+
+ChanColourSet(1,1,0,0,0); 'set channel 1 to black
+
+for n%:= 2 to SampleStates% do    
+    XYSetChan(0);  'set up additional channels for every frame state
+    ChanColourSet(n%,1,(n%-1)*rgb,(n%-1)*rgb,(n%-1)*rgb); 'set channel color in greyscale
+next;
+
+XUnits$(unitsX$);           'set X axis units
+
+ChanUnits$(1,unitsY$);      'set Y axis units
+WindowTitle$(title$);       'Set window title
+
+WindowVisible(1);	        'Make it visible
+Window(topLeftX,topLeftY,bottomRightX,bottomRightY);	    'And display it in position
+
+
+return plot%;
+end;
+
+Proc plotDataFrame()        'plot data from current frame
+
+View(samplingFile%);
+var currentFrameState%:=View(samplingFile%).FrameState(lastFrame%+1); 'get Frame state of currently analyzed frame
+var x:=(lastFrame%*SamplingInterval)/XTick;    'get position on x-axis
+var amp:=ChanValue(ch%,Cursor(6))-ChanValue(ch%,Cursor(4)); 'get amplitude
+var slope:=ChanMeasure(ch%,3,Cursor(8),Cursor(7));  'get slope
+
+if lowpass = 0 then 'if there is no amplitude filter set
+    View(ampPlot%).XYAddData(currentFrameState%,x,amp); 'plot amplitude
+    View(slopePlot%).XYAddData(currentFrameState%,x,slope); 'plot slope
+else
+    if Abs(amp)<lowpass then    'check if amplitude is bigger then threshold
+        View(ampPlot%).XYAddData(currentFrameState%,x,amp); 'plot amplitude
+        View(slopePlot%).XYAddData(currentFrameState%,x,slope); 'plot slope       
+    endif;    
+endif;
+
+View(ampPlot%).Optimise(-1);
+View(ampPlot%).XRange(-1,x+1);
+View(slopePlot%).Optimise(-1);
+View(slopePlot%).XRange(-1,x+1)
+
+end;
+
+Func GetFileFrameStates%()  'get number of frame states from a file
+var samplestates%:=0;    'stores the samplestates
+var n%;    'counter frames
+var i%;    'counter array
+var states%[FrameCount()];  'array to store different frame states, size is equal to worst case where every frame has its own state
+var doubling%:=0;    'flag if the current frame state is already in the list states%[]
+
+For n%:=1 to FrameCount() do                    'loop through all frames
+    frame(n%);                                  'view current iteration frame
+    for i%:=0 to FrameCount()-1 do              'loop through list with frame states
+        if FrameState(-2) = states%[i%] then    'if the current frame state matches one on the list
+            doubling%:=1;                       'flag state as already on the list
+            break;                              'end loop
+        endif;        
+    next;
+    if doubling% <>1 then                       'if the current frame state has not been on the list
+        states%[samplestates%]:=FrameState(-2); 'put it on the list after last entry
+        samplestates%+=1;                       'increase the count of framestates by 1                      
+        doubling%:=0;                           'reset flag for nex loop run
+    endif;    
+next;
+
+return samplestates%;                       'return number of states 
+
+end;
+
+Func GetFileFrameStateList%(allStates%[])   'get number of frame states from a file, the array allStates[] will be filled with a list of the frame states
+var samplestates%:=0;    'stores the samplestates
+var n%;    'counter frames
+var i%;    'counter array
+var states%[FrameCount()];  'array to store different frame states, size is equal to worst case where every frame has its own state
+var doubling%:=0;    'flag if the current frame state is already in the list states%[]
+
+For n%:=1 to FrameCount() do                    'loop through all frames
+    frame(n%);                                  'view current iteration frame
+    for i%:=0 to FrameCount()-1 do              'loop through list with frame states
+        if FrameState(-2) = states%[i%] then    'if the current frame state matches one on the list
+            doubling%:=1;                       'flag state as already on the list
+            break;                              'end loop
+        endif;        
+    next;
+    if doubling% <>1 then                       'if the current frame state has not been on the list
+        states%[samplestates%]:=FrameState(-2); 'put it on the list after last entry
+        samplestates%+=1;                       'increase the count of framestates by 1                      
+        doubling%:=0;                           'reset flag for nex loop run
+    endif;    
+next;
+
+resize allStates%[SampleStates%];           'set the passed array to the needed length
+for n%:=0 to SampleStates%-1 do             'loop through array and copy all the states in
+      allStates%[n%]:=states%[n%]
+next;
+return samplestates%;                       'return number of states 
+
+end;

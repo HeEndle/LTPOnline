@@ -1,0 +1,344 @@
+'libLTPCursor
+'Library of functions for detecting features of fEPSPs and setting Cursors to them for analysis
+'------------------------------------Changelog---------------------------------------
+'2.9.3  -   Places Cursor 7 at Fiber Volley, Cursor 7,8 (10%,90%) shifted to Cursor 8,9.
+'           Percentage of slope used can now be set by high% low% arguments 
+'3.0b   -   refactored
+'3.1b   -   Added Manual Cursor positioning
+'-------------------------------------Cursors----------------------------------------
+'List of Cursors:
+'   1   -   Stimulus artifact
+'   2   -   Baseline start
+'   3   -   Baseline end
+'   4   -   Start response
+'   5   -   End of response
+'   6   -   Response peak
+'   7   -   low% repolarisation for slope
+'   8   -   high% repolarisation for slope
+'---------------------------Global Variable Declarations-----------------------------
+var libLTPCursorVersion$:="3.1b";
+
+'LTPCursorSet(view(),1,0,90,10);   'for testing purposes uncomment this line
+
+proc LTPCursorSetManual(view%,ch%,high%,low%)
+View(view%);
+'---local variable declaration---
+var middleOfFrame:=((XHigh() - XLow())/2)+XLow();    'get the middle of the current frame in X axis
+var n%; 'counter
+'--------------------------------
+
+CursorDelete(-1);   'Clear all existing cursors
+
+for n%:=4 to 8 do
+    CursorNew(middleOfFrame,n%); 'create Cursor
+    
+    docase
+    case n%=4 then CursorLabel(4,n%,"Start Response");  'Set Label for Cursor
+    case n%=5 then CursorLabel(4,n%,"End of response");  'Set Label for Cursor
+    case n%=6 then CursorLabel(4,n%,"Response peak");  'Set Label for Cursor
+    case n%=7 then CursorLabel(4,n%,Str$(low%)+"%"); 'Set Label for Cursor
+    case n%=8 then CursorLabel(4,n%,Str$(high%)+"%"); 'Set Label for Cursor        
+    endcase
+    
+    if n% <= 6 then
+        Interact("Position Cursor",0); 'prompt user to reposition cursors
+        middleOfFrame:=((XHigh() - XLow())/2)+XLow();
+    endif;        
+next;
+
+
+CursorActive(7,19,ch%,"Cursor(6)","Cursor(4)","Cursor(4)",high%);
+CursorActive(8,19,ch%,"Cursor(6)","Cursor(4)","Cursor(4)",low%);
+
+end;
+
+proc LTPCursorSet(view%,ch%,corr%,high%,low%)  'corr%=1 to allow user to correct cursors (will show a prompt). high% and low% set teh percentage of slope used (e.g. 10-90%)
+var artifact%;  'artifact direction 1=coming from positiv -1=coming from negative
+var Baseline;   'stores mean baseline value
+var pos;
+var CursorPos[6]; 'stores cursor positions
+var CursorModes%[6]; 'stores active cursor modes
+var n%; 'loop iterative variable
+
+'---------Cursor modes set by script---------
+CursorModes%[0]:=3;
+CursorModes%[1]:=0;
+CursorModes%[2]:=0;
+CursorModes%[3]:=1;
+CursorModes%[4]:=19;
+CursorModes%[5]:=2;
+'--------------------------------------------
+
+View(view%);
+
+CursorDelete(-1);		                                            'Clear all existing cursors
+
+'--------artifact detection--------
+CursorNew(MinTime(),1);
+CursorLabel(4,1,"Stimulus artifact");
+CursorActive(1,3,ch%,MinTime(),MaxTime());                          'Set Cursor 1 for artifact
+'----------------------------------
+
+'--------baseline detection--------
+CursorNew(Cursor(1)-0.0605,2);		
+CursorLabel(4,2,"Baseline start");	                                'Set Cursor 2 for start of baseline
+
+CursorNew(Cursor(1)-0.0005,3);		
+CursorLabel(4,3,"Baseline end");	                                'Set Cursor 3 for end of baseline
+
+Baseline:=ChanMeasure(ch%,2,Cursor(2),Cursor(3));                   'get mean value of baseline
+'----------------------------------
+
+CursorNew(Cursor(1)+0.001,4);
+CursorLabel(4,4,"Start Response");	                                'Set Cursor 4 (for start of response) 1 ms after artifact
+
+'CursorNew(Cursor(1)+0.0002,9);
+
+'------------------detect last peak of artifact and its direction----------------------------
+CursorNew(Cursor(1),7);                                            'Create helper-Cursor
+CursorLabel(4,7,"Fiber Volley");	                               'later to be used as cursor for Fiber Volley
+while CursorValid(7) = 1 do                                        'Set cursor to last up-spike of artifact
+    pos:=Cursor(7);
+    CursorActive(7,4,ch%,Cursor(7),Cursor(4),0,1+Baseline,1);
+wend;
+CursorActive(7,5,ch%,Cursor(7),Cursor(4),0,-3+Baseline,1);          'Set cursor to downspike at end of artifact if there is one
+if CursorValid(7) = 0 then
+    Cursor(7,pos);
+else
+    pos:=Cursor(7);
+endif;
+
+CursorActive(7,19,ch%,Cursor(7),Cursor(4),Baseline,100);          'Set helper-Cursor at Baseline Niveau after artifact
+pos:=Cursor(7);
+
+if CursorValid(7) then                                             'detect artifact direction
+    artifact%:=1
+    else artifact%:=-1
+endif;
+'---------------------------------------------------------------------------------------------
+
+CursorNew(Cursor(4)+0.0015,5);
+CursorLabel(4,5,"End Response");	                                'Set Cursor 5 (for end of response) 1.5 ms after Cursor 4
+
+if artifact% = 1 then
+    CursorActive(4,17,ch%,Cursor(7),Cursor(5),0,0,0,Cursor(7));   'Set Cursor 4 to fiber volley
+    CursorActive(4,1,ch%,Cursor(4),Cursor(5),0,0,0,Cursor(7));     'Set Cursor 4 to response start after fiber volley. If it fails set back to Baseline niveau
+    CursorActive(7,2,ch%,Cursor(7),Cursor(4),0,0,0,Cursor(7));
+else
+    CursorActiveSet(7,ch%,Cursor(1),Cursor(4),Cursor(4),90);       'set helper-cursor to artifact rise
+    pos:=Cursor(7);
+    CursorActive(7,17,ch%,Cursor(7),Cursor(5),0,0,0,Cursor(7));  'set Cursor 7 to fiber volley or response start
+    'CursorActive(4,17,ch%,Cursor(10),Cursor(6),0,0,0,Cursor(10));  'Set Cursor 4 to fiber volley
+    CursorActive(4,15,ch%,Cursor(7),Cursor(5),0,0,0,Cursor(7));   'Set Cursor 4 to response start
+    CursorActive(4,1,ch%,Cursor(4),Cursor(5),0,0,0,Cursor(4));      'Set Cursor 4 to response start after fiber volley. If it fails set back to helper cursor    
+endif;
+
+Cursor(5,Cursor(4)+0.03);                                           'Set Cursor 5 (for end of response) 30 ms after Cursor 4
+
+CursorNew(Cursor(4),6);
+CursorLabel(4,6,"Response Peak");
+CursorMode(6,2);
+CursorActiveSet(6,ch%,Cursor(4),Cursor(5));		                    'Set Cursor 6 for Minimum value
+
+CursorMode(5,19);
+CursorActiveSet(5,ch%,Cursor(6),Cursor(6)+0.05,Baseline,100);	    'Set Cursor 5 for repolarisation to baseline after response peak
+
+if pos = Cursor(7) then                                             'If no Fiber Volley Exists delete Cursor 7
+    CursorDelete(7);
+endif
+
+'---------ignore big pop-spike after response peak
+CursorNew(Cursor(6),10);
+CursorActive(10,14,ch%,Cursor(6),Cursor(4),0,0,0.00);               'set helper-cursor at slope 0 between response start and minimum
+if CursorValid(10) then
+    CursorActive(6,2,ch%,Cursor(4),Cursor(6),0,0,0,Cursor(6));      'set new response maximum to minimum between helper-cursor and response start
+endif;
+CursorDelete(10);
+'-------------------------------------
+
+while n% < len(CursorPos) do 'save current cursor positions
+    n%:= n%+1;
+    CursorPos[n%-1]:=Cursor(n%);
+wend;
+
+if corr% = 1 then
+    Interact("Cursors automatically set. Correct Cursor position of necessary",1023); 'allow user to reposition cursors
+endif;
+
+for n%:=0 to (len(CursorPos)-1) do                                  'check if user changed cursor positions
+    if CursorPos[n%] <> Cursor(n%+1) then
+        if CursorModes%[n%] = CursorActive(n%+1) then               'check if user changed active mode and keep new mode if changed
+            CursorActive(n%+1,0);                                   'put to static mode if unchanged
+        endif;        
+    endif;
+next;
+
+CursorNew();
+CursorLabel(4,8,Str$(low%)+"%");
+CursorNew();
+CursorLabel(4,9,Str$(high%)+"%");
+
+CursorMode(8,19);
+CursorActiveSet(8,ch%,Cursor(6),Cursor(4),"Cursor(4)",low%);	        'Set Cursor 8 for low% % of maximum response 
+CursorMode(9,19);
+CursorActiveSet(9,ch%,Cursor(6),Cursor(4),"Cursor(4)",high%);	        'Set Cursor 9 for high% % of maximum response
+
+CursorLabelPos(1,12);
+CursorLabelPos(3,10);
+CursorLabelPos(4,15);
+CursorLabelPos(6,25);
+CursorLabelPos(7,27);
+CursorLabelPos(8,20);
+CursorLabelPos(9,23);
+return;
+end;
+proc SaveCursors(CursorPositions[][][]) 'saves corsor position for the current frame state in the array
+'---local variable declaration---
+var n%;
+'--------------------------------
+for n%:=1 to 8 do
+    CursorPositions[FrameState(-2)-1][n%-1][0]:=Cursor(n%);
+next;
+end;
+proc LoadCursors(CursorPositions[][][]) 'set cursors in the current frame state according to positions in the array
+'---local variable declaration---
+var n%;
+'--------------------------------
+for n%:=1 to 8 do
+    Cursor(n%,CursorPositions[FrameState(-2)-1][n%-1][0]);
+next;
+end;
+'---------------Legacy Method-------------------'
+proc LTPCursorSetv139(view%,ch%,corr%)  'legacy method for setting cursors used in LTPOnline until v1.39
+var artifact%;  'artifact direction 1=coming from positiv -1=coming from negative
+var Baseline;   'stores mean baseline value
+var pos;
+var CursorPos[6]; 'stores cursor positions
+var CursorModes%[6]; 'stores active cursor modes
+var n%; 'loop iterative variable
+
+'---------Cursor modes set by script---------
+CursorModes%[0]:=3;
+CursorModes%[1]:=0;
+CursorModes%[2]:=0;
+CursorModes%[3]:=1;
+CursorModes%[4]:=19;
+CursorModes%[5]:=2;
+'--------------------------------------------
+
+View(view%);
+
+CursorDelete(-1);		                                            'Clear all existing cursors
+
+'--------artifact detection--------
+CursorNew(MinTime(),1);
+CursorLabel(4,1,"Stimulus artifact");
+CursorActive(1,3,ch%,MinTime(),MaxTime());                          'Set Cursor 1 for artifact
+'----------------------------------
+
+'--------baseline detection--------
+CursorNew(Cursor(1)-0.0605,2);		
+CursorLabel(4,2,"Baseline start");	                                'Set Cursor 2 for start of baseline
+
+CursorNew(Cursor(1)-0.0005,3);		
+CursorLabel(4,3,"Baseline end");	                                'Set Cursor 3 for end of baseline
+
+Baseline:=ChanMeasure(ch%,2,Cursor(2),Cursor(3));                   'get mean value of baseline
+'----------------------------------
+
+CursorNew(Cursor(1)+0.001,4);
+CursorLabel(4,4,"Start Response");	                                'Set Cursor 4 (for start of response) 1 ms after artifact
+
+'CursorNew(Cursor(1)+0.0002,9);
+
+'------------------detect last peak of artifact and its direction----------------------------
+CursorNew(Cursor(1),10);                                            'Create helper-Cursor
+while CursorValid(10) = 1 do                                        'Set cursor to last up-spike of artifact
+    pos:=Cursor(10);
+    CursorActive(10,4,ch%,Cursor(10),Cursor(4),0,1+Baseline,1);
+wend;
+CursorActive(10,5,ch%,Cursor(10),Cursor(4),0,-3+Baseline,1);          'Set cursor to downspike at end of artifact if there is one
+if CursorValid(10) = 0 then
+    Cursor(10,pos);
+else
+    pos:=Cursor(10);
+endif;
+
+CursorActive(10,19,ch%,Cursor(10),Cursor(4),Baseline,100);          'Set helper-Cursor at Baseline Niveau after artifact
+
+if CursorValid(10) then                                             'detect artifact direction
+    artifact%:=1
+    else artifact%:=-1
+endif;
+'---------------------------------------------------------------------------------------------
+
+CursorNew(Cursor(4)+0.0015,5);
+CursorLabel(4,5,"End Response");	                                'Set Cursor 5 (for end of response) 1.5 ms after Cursor 4
+
+if artifact% = 1 then
+    CursorActive(4,17,ch%,Cursor(10),Cursor(5),0,0,0,Cursor(10));   'Set Cursor 4 to fiber volley
+    CursorActive(4,1,ch%,Cursor(4),Cursor(5),0,0,0,Cursor(10));     'Set Cursor 4 to response start after fiber volley. If it fails set back to Baseline niveau
+else
+    CursorActiveSet(10,ch%,Cursor(1),Cursor(4),Cursor(4),90);       'set helper-cursor to artifact rise
+    CursorActive(10,17,ch%,Cursor(10),Cursor(5),0,0,0,Cursor(10));  'set helper-cursor to fiber volley or response start
+    'CursorActive(4,17,ch%,Cursor(10),Cursor(6),0,0,0,Cursor(10));  'Set Cursor 4 to fiber volley
+    CursorActive(4,15,ch%,Cursor(10),Cursor(5),0,0,0,Cursor(10));   'Set Cursor 4 to response start
+    CursorActive(4,1,ch%,Cursor(4),Cursor(5),0,0,0,Cursor(4));      'Set Cursor 4 to response start after fiber volley. If it fails set back to helper cursor    
+endif;
+
+Cursor(5,Cursor(4)+0.03);                                           'Set Cursor 5 (for end of response) 30 ms after Cursor 4
+
+CursorNew(Cursor(4),6);
+CursorLabel(4,6,"Response Peak");
+CursorMode(6,2);
+CursorActiveSet(6,ch%,Cursor(4),Cursor(5));		                    'Set Cursor 6 for Minimum value
+
+CursorMode(5,19);
+CursorActiveSet(5,ch%,Cursor(6),Cursor(6)+0.05,Baseline,100);	    'Set Cursor 5 for repolarisation to baseline after response peak
+
+CursorDelete(10);
+
+'---------ignore big pop-spike after response peak
+CursorNew(Cursor(6),10);
+CursorActive(10,14,ch%,Cursor(6),Cursor(4),0,0,0.00);               'set helper-cursor at slope 0 between response start and minimum
+if CursorValid(10) then
+    CursorActive(6,2,ch%,Cursor(4),Cursor(6),0,0,0,Cursor(6));      'set new response maximum to minimum between helper-cursor and response start
+endif;
+CursorDelete(10);
+'-------------------------------------
+
+while n% < len(CursorPos) do 'save current cursor positions
+    n%:= n%+1;
+    CursorPos[n%-1]:=Cursor(n%);
+wend;
+
+if corr% = 1 then
+    Interact("Cursors automatically set. Correct Cursor position of necessary",1023); 'allow user to reposition cursors
+endif;
+
+for n%:=0 to (len(CursorPos)-1) do                                  'check if user changed cursor positions
+    if CursorPos[n%] <> Cursor(n%+1) then
+        if CursorModes%[n%] = CursorActive(n%+1) then               'check if user changed active mode and keep new mode if changed
+            CursorActive(n%+1,0);                                   'put to static mode if unchanged
+        endif;        
+    endif;
+next;
+
+CursorNew();
+CursorLabel(4,7,"10%%");
+CursorNew();
+CursorLabel(4,8,"90%%");
+
+CursorMode(7,19);
+CursorActiveSet(7,ch%,Cursor(6),Cursor(4),"Cursor(4)",10);	        'Set Cursor 7 for 10% of maximum response 
+CursorMode(8,19);
+CursorActiveSet(8,ch%,Cursor(6),Cursor(4),"Cursor(4)",90);	        'Set Cursor 8 for 90% of maximum response
+
+CursorLabelPos(1,12);
+CursorLabelPos(3,10);
+CursorLabelPos(4,15);
+CursorLabelPos(7,20);
+CursorLabelPos(8,23);
+CursorLabelPos(6,25);
+return;
+end;

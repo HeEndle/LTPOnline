@@ -1,0 +1,134 @@
+'------------------------------------Changelog---------------------------------------
+'1.0    - Initial release
+'---------------------------Global Variable Declarations-----------------------------
+var libFileHandlingVersion$:="1.0";
+'------------------------------------------------------------------------------------
+'var test%;
+'var t$[3];
+'Var t2$[1];
+'Var tsplit$[2];
+'t$[0]:="Hallo=19";t$[1]:="eins=8";t$[2]:="zwei=7";
+'Message(FilePath$());
+'test%:=LoadConfig();
+'WriteLinesStart(test%,t$);
+'GetLines%(test%);
+'ReadLinesToArr(test%,t2$);
+'SplitConfigLines(t2$[1],tsplit$[]);
+'WriteConfigEntry(test%,"Hallo","33")
+'Message(ReadConfigEntry$(test%,"SlopeTo"));
+'Message(ReadConfigEntry$(test%,"SlopeFrom"));
+'FileClose(0,-1);
+'Halt;
+
+Func LoadConfig()   'loads the Config file and returns its view handle
+var file%;
+
+file%:= FileOpen("Config.ini",1);   'open Config file and place Cursor at end of text. If it does not exist create it
+
+if file% < 0 then
+    file%:= FileNew(1);
+    FileSaveAs("Config.ini");
+endif;
+
+if file% < 0 then   'check if there was an error while opening the file
+    Message("Error loading Configuration file");
+    return -1;
+endif;
+
+return file%;
+End;
+Proc ReadLinesToArr(textfile%, TextArr$[])   'Reads textfile% and returns array cotaining each line as a seperate element
+view(textfile%);
+var n%;
+var lines%:=GetLines%(textfile%);
+resize TextArr$[lines%];
+MoveTo(0,0);
+
+For n%:=0 to lines%-1 do
+    Read(TextArr$[n%]);
+next
+
+return;
+end
+
+Func WriteLinesStart(textfile%,args$[]);    'Writes Elements in args$ each in a new line at the beginning of textfile%. Returns -1 in case of error
+view(textfile%);
+var n%;
+var print%;
+MoveTo(0,0);
+
+For n%:=0 to len(args$)-1 do    
+    print%:=Print(args$[n%]+"\n");
+    if print% < 0 then
+        return -1;
+    endif
+next
+
+FileSave();
+return 1;
+end;
+Func GetLines%(textfile%)    'Returns line count of a Text file
+var n%:=-1;
+var line%:=1;
+var a$;
+View(textfile%);
+MoveTo(0,0);
+
+While line%>0 do
+    line%:=Read(a$);
+    n%:=n%+1;
+wend
+
+return n%;
+End
+Func SplitConfigLines(string$,split$[]) 'Splits strings in form Variable=Value into 2 element array. Returns -1 if error
+var read%;
+ReadSetup("","","","","=");
+read%:=ReadStr(string$,split$[0],split$[1]);
+
+if read% < 0 then
+    return -1;
+endif
+
+return 1;
+end
+Proc WriteConfigEntry(textfile%,key$,value$)    'updates the value of a config entry (key$) or creates the entry if it doesn't exist
+
+var lines%:=GetLines%(textfile%);   'get config line count
+var currentLine$;
+var pair$[2];
+var found%;
+
+View(textfile%).MoveTo(0,0);
+found%:=View(textfile%).EditFind(key$); 'search for key in config file
+
+if found% = 1 then
+    View(textfile%).MoveBy(0,1);
+    View(textfile%).MoveBy(1,50,0);
+    View(textfile%).Print(value$);
+    View(textfile%).FileSave()    
+else    
+    var printLine$:=key$+"="+value$;    'line to be printed to config
+    var printLines$[1];
+    printLines$[0]:=printLine$;
+    WriteLinesStart(textfile%,printLines$); 'write line to config
+endif;
+
+end
+Func ReadConfigEntry$(textfile%,key$)   'returns the value to the key from the config file
+var found%;
+var line$;
+var pair$[2];
+View(textfile%).WindowVisible(1);
+View(textfile%).MoveTo(0,0);
+found%:=View(textfile%).EditFind(key$); 'search for key in config file
+if found% = 1 then
+    View(textfile%).MoveBy(0,1);
+    ReadSetup("","","","","");
+    View(textfile%).Read(line$);
+    SplitConfigLines(line$,pair$);
+    return pair$[1];
+else
+    return "null"
+endif;
+end;

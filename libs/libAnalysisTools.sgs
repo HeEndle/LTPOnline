@@ -1,0 +1,237 @@
+'libAnalysisTools
+'------------------------------------Changelog---------------------------------------
+'1.01: 27.11.2015 - set array size for x and y dynamically to get all the points. Now supports more than 50 Datapoint in Channel 2
+'1.02: 14.03.2016 - runs for every additional Channel once. Added loop, removed statically assumtion of 2 Channels
+'1.03: 18.05.2016 - 
+'2.0: 14.08.2020  - rewrote 
+'---------------------------Global Variable Declarations-----------------------------
+var libAnalysisToolsVersion$:="2.0";
+'------------------------------------------------------------------------------------
+
+'generates plots offline from views. views must be in format view%[0][] = views; view%[][0] = channel. Returns viewhanlde of generated plot. mode% = 1 for amplitude mode% = 2 for slope
+Func offlinePlot(viewArr%[][],mode%,topLeftX,topLeftY,bottomRightX,bottomRightY)   
+
+var n%; 'counter
+var longest%;   'stores frame number of longest view
+var rgb:=1.0/len(viewArr%[0][]);    'used to set channel color in greyscale
+var plot%:=FileNew(12);   'create XY view
+var plotStateN%; 'stores plot of current frame state
+var x[0];   'array to temporarily store x coordinates from a frame state
+var y[0];   'array to temporarily store y coordinates from a frame state
+
+for n%:=2 to len(viewArr%[0][]) do   'create number of channel according to number of views
+    View(plot%).XYSetChan(0);        'create new channel
+next
+    
+for n%:=0 to len(viewArr%[0][])-1 do
+    
+    View(viewArr%[0][n%]);       'set view to next file view
+    plotStateN%:=MeasureToXY(0); 'create temporary XY view    
+    
+    docase 
+    case mode% = 1 then 'if mode is amplitude
+        MeasureX(104,viewArr%[1][n%]);  'freame number
+        MeasureY(101,viewArr%[1][n%],"Cursor(6)","Cursor(2)");  'Value Difference
+        WindowTitle$("Ampliude of response");   'set window title
+    case mode% = 2 then 'if mode is slope
+        MeasureX(104,viewArr%[1][n%],"0",0,MaxTime());  'frame number
+        MeasureY(3,viewArr%[1][n%],"Cursor(8)","Cursor(7)");    'slope
+        WindowTitle$("Initial slope");   'set window title     
+    endcase
+    
+    MeasureChan(1,"Amp.");
+    ProcessFrames(1,-1,-1,0,1,1);	'Process all frames
+    resize x[XYCount(1)];           'set size of array to number of data points
+    resize y[XYCount(1)];           ''set size of array to number of data points
+    XYGetData(1,x,y);               'get date from temporary plot channel 1 and save it in x and y
+    FileClose(0,-1);                'close temporary plot
+        
+    View(plot%);        
+    XYAddData(n%+1,x,y);            'add data to channel according to view
+    XYJoin(n%+1,1);	                'Join the dots
+    ChanColourSet(n%+1,1,n%*rgb,n%*rgb,n%*rgb); 'set channel color in greyscale   
+    
+    if longest% < len(x) then
+        longest%:=len(x);
+    endif;    
+    
+next;
+
+View(plot%);
+Window(topLeftX,topLeftY,bottomRightX,bottomRightY);    'set window position
+WindowVisible(1);	'Make visible
+XYKey(1,1);		    'Show the key
+XRange(0,longest%+1);
+Optimise(-1);       'optimize y axis
+
+return plot%;
+end;
+'---------------Legacy Method-------------------'
+func ampPlot(view%[][])
+var n%:=len(view%[][0]);
+var plot%;                  'viewhandle for the final plot
+var ampPlot2%;
+
+View(view%[0][0]);
+plot%:=MeasureToXY(0);   'Set XY view for amplitude
+WindowVisible(1);	'Make visible
+MeasureX(104,view%[1][0],"0",0,MaxTime());
+MeasureY(101,view%[1][0],"Cursor(6)","Cursor(2)");
+MeasureChan(1,"Channel 1",0); 
+WindowTitle$("Ampliude of response");	
+XYJoin(1,1);	'Join the dots
+XYKey(1,1);		'Show the key
+ProcessFrames(1,-1,-1,0,1,1);	'Process all frames
+var x[XYCount(1)];
+var y[XYCount(1)];
+'XYGetData(1,x,y);
+Window(50,0,100,50);	'And display top-right of screen
+
+'while n% <= len(view%[][0]) do
+'
+'arrclear(x);
+'arrclear(y);
+
+View(view%[0][n%-1]);
+ampPlot2%:=MeasureToXY(0);   'Set XY view for amplitude
+MeasureX(104,view%[1][n%-1],"0",0,MaxTime());
+MeasureY(101,view%[1][n%-1],"Cursor(6)","Cursor(2)");
+MeasureChan(1,"Amp.",0);    
+XYJoin(n%,1);	'Join the dots
+XYKey(1,1);		'Show the key
+ProcessFrames(1,-1,-1,0,1,1);	'Process all frames
+XYGetData(1,x,y);
+FileClose(0,-1);
+View(plot%);
+XYSetChan(0);
+arrsubzero(x);
+arrsubzero(y);
+XYAddData(2,x,y);
+XYJoin(2,1);	'Join the dots
+XYDrawMode(2,1,6);
+          
+'    n%:=n%+1;
+'wend
+View(plot%);
+Optimise(-1);
+
+return plot%;
+end;
+
+func slopePlot(view%[][])
+var n%:=2;
+var plot%;
+var slopePlot2%;
+
+View(view%[0][0]);
+plot%:=MeasureToXY(0); 'Set XY view for slope
+WindowVisible(1);	'Make it visible
+MeasureX(104,view%[1][0],"0",0,MaxTime());
+MeasureY(3,view%[1][0],"Cursor(8)","Cursor(7)");
+MeasureChan(1,"Channel 1",0);
+WindowTitle$("Slope from 10% to 90%");	
+XYJoin(1,1);	'Join the dots	
+XYKey(1,1);		'Show the key
+ProcessFrames(1,-1,-1,0,1,1);	'Process all frames
+var x[XYCount(1)];
+var y[XYCount(1)];
+Window(50,50,100,100);	'And display bottom left of screen
+
+'arrclear(x);
+'arrclear(y);
+
+View(view%[0][n%-1]);
+slopePlot2%:=MeasureToXY(0); 'Set XY view for slope
+MeasureX(104,view%[1][n%-1],"0",0,MaxTime());
+MeasureY(3,view%[1][n%-1],"Cursor(8)","Cursor(7)");
+MeasureChan(1,"Slope",0);  
+XYJoin(n%,1);	'Join the dots	
+XYKey(1,1);		'Show the key    
+ProcessFrames(1,-1,-1,0,1,1);	'Process all frames
+XYGetData(1,x,y);
+FileClose(0,-1);
+View(plot%);
+XYSetChan(0);
+arrsubzero(x);
+arrsubzero(y);
+XYAddData(2,x,y);
+XYJoin(2,1);	'Join the dots
+XYDrawMode(2,1,6);
+
+View(plot%);
+Optimise(-1);
+
+return plot%;
+end;
+
+func FVPlot(view%[][])
+var n%:=len(view%[][0]);
+var plot%;                  'viewhandle for the final plot
+var FVPlot2%;
+
+View(view%[0][0]);
+plot%:=MeasureToXY(0);   'Set XY view for amplitude
+WindowVisible(1);	'Make visible
+MeasureX(104,view%[1][0],"0",0,MaxTime());
+MeasureY(101,view%[1][0],"Cursor(6)","Cursor(2)");
+MeasureChan(1,"Channel 1",0); 
+WindowTitle$("Ampliude of response");	
+XYJoin(1,1);	'Join the dots
+XYKey(1,1);		'Show the key
+ProcessFrames(1,-1,-1,0,1,1);	'Process all frames
+var x[XYCount(1)];
+var y[XYCount(1)];
+'XYGetData(1,x,y);
+Window(50,0,100,50);	'And display top-right of screen
+
+'while n% <= len(view%[][0]) do
+'
+'arrclear(x);
+'arrclear(y);
+
+View(view%[0][n%-1]);
+FVPlot2%:=MeasureToXY(0);   'Set XY view for amplitude
+MeasureX(104,view%[1][n%-1],"0",0,MaxTime());
+MeasureY(101,view%[1][n%-1],"Cursor(6)","Cursor(2)");
+MeasureChan(1,"Amp.",0);    
+XYJoin(n%,1);	'Join the dots
+XYKey(1,1);		'Show the key
+ProcessFrames(1,-1,-1,0,1,1);	'Process all frames  
+XYGetData(1,x,y);
+FileClose(0,-1);
+View(plot%);
+XYSetChan(0);
+arrsubzero(x);
+arrsubzero(y);
+XYAddData(2,x,y);
+XYJoin(2,1);	'Join the dots
+XYDrawMode(2,1,6);
+          
+'    n%:=n%+1;
+'wend
+View(plot%);
+Optimise(-1);
+
+return plot%;
+end;
+
+func arrsubzero(x[]);   'removes trailing zeros from array
+var n%:=len(x);
+while n% > 0 do
+    if x[n%-1] = 0 then
+        n%:=n%-1;
+    else break;
+    endif;
+wend;
+resize x[n%];    
+return;
+end;
+
+func arrclear(x[]); 'sets all elements in array to 0
+var n%:=0;
+while n% <> len(x) do
+    x[n%]:=0;
+    n%:=n%+1;
+wend;   
+return;
+end;

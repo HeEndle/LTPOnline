@@ -1,0 +1,64 @@
+'libIOCurve
+'Library of protocols for IO Curves with a manually controlled simulus isolator
+'------------------------------------Changelog---------------------------------------
+'1.0    -   Initial release
+'---------------------------Global Variable Declarations-----------------------------
+var libIOCurveVersion$:="1.0";
+
+
+Func IO1to9v(currentframe%,SampleStates%)   'IO Curve 1V to 9V, 2V-6V in triple replicates
+
+docase
+        case currentframe% = SampleStates% then
+            SampleStop(1);
+            Message("Set Stimulation Voltage to 2 V");
+            SampleSweep();
+        case currentframe% = (SampleStates% + 3*SampleStates%) then
+            SampleStop(1);
+            Message("Set Stimulation Voltage to 3 V");
+            SampleSweep();
+        case currentframe% = (SampleStates% + 6*SampleStates%) then
+            SampleStop(1);
+            Message("Set Stimulation Voltage to 4 V");
+            SampleSweep();
+        case currentframe% = (SampleStates% + 9*SampleStates%) then
+            SampleStop(1);
+            Message("Set Stimulation Voltage to 5 V");
+            SampleSweep();
+        case currentframe% = (SampleStates% + 12*SampleStates%) then
+            SampleStop(1);
+            Message("Set Stimulation Voltage to 5,5 V");
+            SampleSweep();
+        case currentframe% = (SampleStates% + 15*SampleStates%) then
+            SampleStop(1);
+            Message("Set Stimulation Voltage to 6 V");
+            SampleSweep();
+        case currentframe% = (SampleStates% + 18*SampleStates%) then
+            SampleStop(1);
+            Message("Set Stimulation Voltage to 6,5 V");
+            SampleSweep();
+        case currentframe% = (SampleStates% + 19*SampleStates%) then
+            SampleStop(1);            
+            Message("Set Stimulation Voltage to 7 V");
+            SampleSweep();
+        case currentframe% = (SampleStates% + 20*SampleStates%) then
+            SampleStop(1);            
+            Message("Set Stimulation Voltage to 7,5 V");
+            SampleSweep();
+        case currentframe% = (SampleStates% + 21*SampleStates%) then
+            SampleStop(1);            
+            Message("Set Stimulation Voltage to 8 V");
+            SampleSweep();
+        case currentframe% = (SampleStates% + 22*SampleStates%) then
+            SampleStop(1);            
+            Message("Set Stimulation Voltage to 8,5 V");
+            SampleSweep();
+        case currentframe% = (SampleStates% + 23*SampleStates%) then
+            SampleStop(1);            
+            Message("Set Stimulation Voltage to 9 V");
+            SampleSweep();
+        case currentframe% = (SampleStates% + 24*SampleStates%) then
+            SampleStop();
+        endcase
+
+end;
