@@ -6,9 +6,11 @@ Proc Versions()
 '1.4b    - Refactored new LTPOnline Script
 '1.41b   - Added manual cursor positioning /need: save cursor positions for each frame state
 '1.41b   - Added saving cursor positions for each frame state
+'1.42b   - Added button to load config files
+'        - Added button to save config files
 end;
 '---------------------------Global Variable Declarations-----------------------------
-var LTPOnlineVersion$:="1.41b";    'Script Version
+var LTPOnlineVersion$:="1.42b";    'Script Version
 var SampleStates%:=SampleStates(); 'stores the number of frame states (number of stimulation Channels)
 var FrameStates%[0];               'stores the frame states as a list
 '------------View and Channel handles--------
@@ -215,8 +217,13 @@ ReadConfig();
 
 var dlgElement%:=1;    'iterates element position
 var dlgItem%:=1;       'iterates dialog item number
+var dlgResult%;
 
 DlgCreate("LTPOnline Settings");
+
+DlgButton(2,"Load Settings",LoadConfigBtn%,1,dlgElement%);
+DlgButton(3,"Save Settings",SaveConfigBtn%,16,dlgElement%);
+dlgElement%+=1;
 
 DlgGroup("Response detection setting",0,dlgElement%,0,4);
 dlgElement%+=1;
@@ -255,8 +262,12 @@ dlgElement%+=1;
 DlgText("LTP Online Script Version: "+LTPOnlineVersion$+"\nResponse Detection Version: "+libLTPCursorVersion$+"\nAnalysis Tools Version: "+libAnalysisToolsVersion$,0,dlgElement%);
 
 DlgAllow(0,0,SettingsChanged%);
-DlgShow(currentDetectionModule%,high%,low%,lowpass,currentIOModule%,average);
-WriteConfig();
+dlgResult%:=DlgShow(currentDetectionModule%,high%,low%,lowpass,currentIOModule%,average);
+
+if dlgResult% = 1 then
+    WriteConfig();
+endif;
+
 return 1; 'This leaves toolbar active
 end;
 
@@ -269,6 +280,48 @@ case item% = 5 then   'if IO-Curve setting changed
     currentvalue%:=DlgValue(item%); 'get the current setting of the dropdown list
     DlgValue$(dlgTextIO%,IOModulesExplanation$[currentvalue%]);   'set the explanation to current selected item
 endcase;
+
+return 1;
+end;
+Func LoadConfigBtn%()       'Settings dialog button to load custom config files
+'---local variables---
+var currentview%:=View();   'save current view
+var config%:= FileOpen("",1,0,"open MiniMonster configuration file");
+'---------------------
+View(currentview%);
+
+if config% > 0 then
+    ReadConfig(config%);
+endif;
+
+DlgValue(1,currentDetectionModule%);
+DlgValue(2,high%);
+DlgValue(3,low%);
+DlgValue(4,lowpass);
+DlgValue(5,currentIOModule%);
+DlgValue(6,average);
+
+return 1;
+end;
+Func SaveConfigBtn%()       'Settings dialog button to save custom config files
+'---local variables---
+var currentview%:=View();   'save current view
+var config%:= FileNew(1);
+'---------------------
+FileSaveAs("",0,"Save MiniMonster configuration file");
+
+View(currentview%);
+
+currentDetectionModule%:=DlgValue(1);
+high%:=DlgValue(2);
+low%:=DlgValue(3);
+lowpass:=DlgValue(4);
+currentIOModule%:=DlgValue(5);
+average:=DlgValue(6);
+
+WriteConfig(config%);
+
+View(currentview%);
 
 return 1;
 end;
@@ -474,12 +527,17 @@ next;
 
 return;
 end;
-Proc ReadConfig()   'Read config file and load values stored in it
+Proc ReadConfig(view%:=-1)   'Read config file and load values stored in it then close config
 '---local variables---
 var currentview%:=View();   'save current view
-var config%:=LoadConfig();  'load config file
+var config%;
 var value$;
 '---------------------
+if view% = -1 then
+    config%:=LoadConfig();  'load config file
+else
+    config%:=view%;  'use view handle
+endif;
 
 value$:=ReadConfigEntry$(config%,"DetectionModule");
 if value$ <> "null" then
@@ -510,11 +568,17 @@ View(config%);
 FileClose(0,-1); 'Close config file
 View(currentview%); 'return to current view
 end;
-Proc WriteConfig()  'Write current setting to config file
+Proc WriteConfig(view%:=-1)  'Write current setting to config file and close it
 '---local variables---
 var currentview%:=View();   'save current view
-var config%:=LoadConfig();  'load config file
+var config%;
 '---------------------
+
+if view% = -1 then
+    config%:=LoadConfig();  'load config file
+else
+    config%:=view%;  'use view handle
+endif;
 
 WriteConfigEntry(config%,"DetectionModule",Str$(currentDetectionModule%));
 WriteConfigEntry(config%,"IOCurve",Str$(currentIOModule%));
