@@ -1,0 +1,562 @@
+'LTPOnline
+'Script written by Heiko Endle, Universitätsmedizin Mainz, Germany.
+
+'---------------------------Global Variable Declarations-----------------------------
+var LTPOnlineVersion$:="1.3.9";
+var SampleStates%:=SampleStates();  'stores the number of frame states
+var SampleInterval:=SampleFixedInt(1);  'Stores the inter-stimulus interval
+var rawData%;             'view handle for the currend sampling file
+var ch%;                  'response channel
+var last%;                'last processed frame
+var fv%;
+var slopePlot%;           'view handle for online plot of Slope
+var ampPlot%;             'view handle for online plot of amplitude
+var average:=5;           'Stores the number of minutes to average
+var noisereject:=0.1;     'Amplitude of the noise
+var lowpass:=0;           'Lowpass cutoff value for filtering false detections including artifact
+var Helpercursor%:=1;     'flag if helper cursor for XY views are enabled
+var Helpercursorremember%; 'for storing Helpercursorflag during I/O
+var Helpercursortime:=5; 'time in min for the helpercursor to average.
+var BaselineIgnoreTime%:=5; 'first X minutes of baseline to be ignored for stability check
+var BaselineMeanAmplitudes[SampleStates()];    'stores mean amplitudes of Baseline
+var BaselineMeanSlopes[SampleStates()];    'stores mean slopes of Baseline
+var avgdata%[2][2];       'View handle of averaged data [0] contains the views [1] contains the channels
+var Mode%:=0;             'flag for recording mode -2 = rescan, -1 = Noise detection, 1 = I/O, 2 = Baseline, 3 = TBS/Tetanus, 4 = LTP
+var debug%;
+var realdebug;
+var CursorState1[8];
+var CursorState2[8];
+var CursorCheck%:=0;
+'-----------------------------------------------------------------------------
+'rawData% := FileNew(0,1);
+'WindowVisible(1);	'Make it visible
+'Window(0,0,50,100); 'And display on the left side of the screen
+'
+DoToolbar();
+
+Halt;
+
+#include "libLTPCursor.sgs"
+#include "libAnalysisTools.sgs"
+
+Func DoToolbar()
+ToolbarClear();
+ToolbarSet(0,"", Idle%); 'Define an idle function 
+ToolbarSet(1,"Quit", Quit%);
+ToolbarSet(2, "Start", Start%); 'Link to Start function
+ToolbarSet(3, "Stop", Stop%); 'Link to Stop function
+ToolbarSet(4, "Reset", Reset%); 'Link to Reset function
+ToolbarSet(5, "Abort", Abort%); 'Link to Abort function
+ToolbarSet(6, "Mode", Modedial%); 'Link to Analyze function
+ToolbarSet(7, "I/O mode: off", InputOutput%); 'Link to I/O function
+ToolbarSet(8, "Rescan", rescan%); 'Link to rescan function
+ToolbarSet(9, "Analyze", Analyze%); 'Link to Analyze function
+ToolbarSet(10, "Settings", Config%); 'Link to Config function
+return Toolbar("LTP Online Skript Version: "+LTPOnlineVersion$+" | Response Detection Version: "+libLTPCursorVersion$, 0);
+end;
+
+func idle%()
+
+if rawData% <> 0 then
+
+var f%;     'stores frame count
+var slopePlot2%;
+var x;
+var y;
+var n%;
+
+view (rawData%); 'make sampled data window current
+f% := FrameCount(); ' How many frames are in the file
+
+If ((f% - last%) >= 1) then 'if we have >= 1 unprocessed sweeps
+
+    Frame(last%+1);                     'Set view to saved frame
+        
+    If Mode% = -1 then  'stop after first sweep if in noise detection mode
+        SampleStop();
+        noisereject:=GetMaxAmp();   'set noiselevel to measured value
+        Message("Noise level: "+Str$(noisereject)+" mV");
+        FileClose();
+        rawData%:=0;    
+        return 1;    
+    endif
+        
+    LTPCursorSet(rawData%,ch%,0);
+    
+    docase
+    case CursorCheck% = 0 then
+        CursorSave(CursorState1,1,6);
+        CursorCheck%+=1;
+    case CursorCheck% = 1 then
+        CursorSave(CursorState2,1,6);
+        CursorCheck%+=1;
+    endcase;
+    
+    if Mode% = 1 then
+        docase
+        case f% = 2 then
+            SampleStop(1);
+            Message("Set Stimulation Voltage to 2 V");
+            SampleSweep();
+        case f% = 8 then
+            SampleStop(1);
+            Message("Set Stimulation Voltage to 3 V");
+            SampleSweep();
+        case f% = 14 then
+            SampleStop(1);
+            Message("Set Stimulation Voltage to 4 V");
+            SampleSweep();
+        case f% = 20 then
+            SampleStop(1);
+            Message("Set Stimulation Voltage to 5 V");
+            SampleSweep();
+        case f% = 26 then
+            SampleStop(1);
+            Message("Set Stimulation Voltage to 5,5 V");
+            SampleSweep();
+        case f% = 32 then
+            SampleStop(1);
+            Message("Set Stimulation Voltage to 6 V");
+            SampleSweep();
+        case f% = 38 then
+            SampleStop(1);
+            Message("Set Stimulation Voltage to 6,5 V");
+            SampleSweep();
+        case f% = 40 then
+            SampleStop(1);            
+            Message("Set Stimulation Voltage to 7 V");
+            SampleSweep();
+        case f% = 42 then
+            SampleStop(1);            
+            Message("Set Stimulation Voltage to 7,5 V");
+            SampleSweep();
+        case f% = 44 then
+            SampleStop(1);            
+            Message("Set Stimulation Voltage to 8 V");
+            SampleSweep();
+        case f% = 46 then
+            SampleStop(1);            
+            Message("Set Stimulation Voltage to 8,5 V");
+            SampleSweep();
+        case f% = 48 then
+            SampleStop(1);            
+            Message("Set Stimulation Voltage to 9 V");
+            SampleSweep();
+        case f% = 50 then
+            SampleStop();
+        endcase         
+    endif
+    
+        
+    if slopePlot% = -1 then
+        slopePlot%:=MeasureToXY(0); 'Set XY view for online slope
+        MeasureChan(1,"Channel 1",0); 
+        XYSetChan(0);               'setup second channel
+        XYDrawMode(2,1,6);
+        XYJoin(1,0);
+        XYKey(1,1);		            'Show the key
+        XAxisStyle(0,4,1);
+        XUnits$("min");
+        ChanUnits$(1,"mV/s");
+        WindowTitle$("10% to 90% Slope");
+        WindowVisible(1);	        'Make it visible
+        Window(50,50,100,100);	    'And display bottom left of screen
+         
+        view (rawData%);
+        Frame(last%+1);
+        
+        ampPlot%:=MeasureToXY(0); 'Set XY view for online amplitude
+        MeasureChan(1,"Channel 1",0); 
+        XYSetChan(0);               'setup second channel
+        XYDrawMode(2,1,6);
+        XYJoin(1,0);
+        XYKey(1,1);		            'Show the key
+        XAxisStyle(0,4,1);
+        XUnits$("min");
+        ChanUnits$(1,"mV");
+        WindowTitle$("Amplitude of response");
+        WindowVisible(1);	        'Make it visible
+        Window(50,0,100,50);	    'And display top left of screen        
+        
+        view (rawData%);
+        Frame(last%+1);
+    endif;
+     
+'    y:=ChanMeasure(ch%,3,"Cursor(8)","Cursor(7)");
+'    x:=last%*15;
+'    x:=x/60;
+'    
+    docase
+        case View(rawData%).FrameState(last%+1) = 1 then
+            
+        View(rawData%);   
+        Frame(last%+1);
+        y:=(ChanValue(ch%,Cursor(6))-ChanValue(ch%,Cursor(4)));
+        x:=last%*15;
+        x:=x/60;            
+            
+        if lowpass = 0 then  
+            if Abs(y) > noisereject then    
+                View(ampPlot%);             
+                XYAddData(1,x,y);            
+            
+                View(rawData%);
+                Frame(last%+1);
+                y:=ChanMeasure(ch%,3,"Cursor(8)","Cursor(7)");
+        
+                View(slopePlot%);
+                XYAddData(1,x,y);
+            else
+                if mode% = 1 then
+                    y:=0;
+                    View(ampPlot%);             
+                    XYAddData(1,x,y);
+                    
+                    View(slopePlot%);
+                    XYAddData(1,x,y);
+                endif                          
+            endif
+        else
+            if Abs(y) > noisereject AND Abs(y) < lowpass then    
+                View(ampPlot%);             
+                XYAddData(1,x,y);            
+            
+                View(rawData%);
+                Frame(last%+1);
+                y:=ChanMeasure(ch%,3,"Cursor(8)","Cursor(7)");
+        
+                View(slopePlot%);
+                XYAddData(1,x,y);
+            else
+                if mode% = 1 then
+                    y:=0;
+                    View(ampPlot%);             
+                    XYAddData(1,x,y);
+                    
+                    View(slopePlot%);
+                    XYAddData(1,x,y);
+                endif                          
+            endif            
+        endif
+            
+                       
+        case View(rawData%).FrameState(last%+1) = 2 then
+            
+        View(rawData%);
+        Frame(last%+1);
+        y:=(ChanValue(ch%,Cursor(6))-ChanValue(ch%,Cursor(4)));
+        x:=last%*15;
+        x:=x/60;
+            
+        if lowpass = 0 then    
+            if Abs(y) > noisereject then
+                View(ampPlot%);             
+                XYAddData(2,x,y);    
+            
+                View(rawData%);
+                Frame(last%+1);    
+                y:=ChanMeasure(ch%,3,"Cursor(8)","Cursor(7)");
+               
+                View(slopePlot%);
+                XYAddData(2,x,y);
+            else
+                if mode% = 1 then
+                    y:=0;
+                    View(ampPlot%);             
+                    XYAddData(2,x,y);
+                    
+                    View(slopePlot%);
+                    XYAddData(2,x,y);
+                endif     
+            endif
+        else
+            if Abs(y) > noisereject AND Abs(y) < lowpass then
+                View(ampPlot%);             
+                XYAddData(2,x,y);    
+            
+                View(rawData%);
+                Frame(last%+1);    
+                y:=ChanMeasure(ch%,3,"Cursor(8)","Cursor(7)");
+               
+                View(slopePlot%);
+                XYAddData(2,x,y);
+            else
+                if mode% = 1 then
+                    y:=0;
+                    View(ampPlot%);             
+                    XYAddData(2,x,y);
+                    
+                    View(slopePlot%);
+                    XYAddData(2,x,y);
+                endif     
+            endif        
+        endif    
+                   
+    endcase;
+    Optimise(-1);
+    XRange(-1,x+1);    
+    View(ampPlot%);
+    Optimise(-1);
+    XRange(-1,x+1);   
+       
+  last% := last% + 1; ' keep track of last frame done
+        
+    if Helpercursor% = 1 AND last% mod ((Helpercursortime * 60)/15) = 0 then
+        Horizontalavg((Helpercursortime * 60)/15, ampPlot%);    'draw helpercursor for AmpPlot
+        Horizontalavg((Helpercursortime * 60)/15, slopePlot%);  'draw helpercursor for SlopePlot
+            
+        if Mode% = 2 AND last% > ((BaselineIgnoreTime% * 60)/15) then
+                GetBaselineStabilityValue((Helpercursortime * 60)/15, ampPlot%);
+                GetBaselineStabilityValue((Helpercursortime * 60)/15, slopePlot%);
+        endif             
+    endif       
+        
+        
+Endif;
+Endif
+Return 1; 'return to active toolbar
+end; 
+
+Func Quit%()                'Button 1 to quit script
+return 0; ' Return zero to exit Toolbar()
+end;
+
+Func Start%()               'Button 2 START SAMPLING routine
+rawData% := FileNew(0,1);
+WindowVisible(1);	'Make it visible
+Window(0,0,50,100); 'And display on the left side of the screen
+
+docase
+case Mode% = 1 then
+    WindowTitle$("Input-Output");
+    Message("Set Stimulation Voltage to 1 V");
+case Mode% = -1 then
+    WindowTitle$("Noise Detection");
+endcase
+
+ch%:=ChanSelectDlg(rawData%);
+slopePlot%:=-1;
+SampleStart();
+return 1;                   'This leaves toolbar active
+end; 
+
+Func Stop%()                'Button 3 STOP SAMPLING routine
+SampleStop();
+return 1; 'This leaves toolbar active
+end;
+
+Func Reset%()               'Button 4 RESET SAMPLING routine
+SampleReset();
+return 1; 'This leaves toolbar active
+end;
+
+Func Abort%()               'Button 5 ABORT SAMPLING routine
+SampleAbort();
+fv% := -1; ' Flag we have no sampling view
+return 1; 'This leaves toolbar active
+end;
+
+Func Analyze%()             'Button 9 for Analysis
+if SampleStatus() = -1 then
+    if not rawData% then    'if no file is opened by the script, display fileopen dialog
+        rawData%:= FileOpen("",0,1);    'display file open dialog
+        CursorDelete(-1);   'clear all existing cursors
+        Window(0,0,50,100); 'And display on the left side of the screen
+        ch%:=ChanSelectDlg(rawData%); 'Diplay channel selection dialog
+    endif    
+    view (rawData%);
+    avgdata%[0][0]:=SetAutoAv(ch%,average*2,average*2);  'Average every x Frames
+    avgdata%[1][0]:=1;
+    WindowVisible(1);
+    ProcessFrames(-1,-1,1,0,1,1,0,1);   'Process Frame state 1
+    Window(0,0,50,50);		'And display to the top left of screen
+    LTPCursorSet(avgdata%[0][0],1,1);
+
+    View(rawData%);
+    avgdata%[0][1]:=SetAutoAv(ch%,average*2,average*2);  'Average every x Frames
+    avgdata%[1][1]:=1;
+    Optimise(ch%);
+    WindowVisible(1);
+    ProcessFrames(-1,-1,2,0,1,1,0,1);   'Process Frame state 2
+    Window(0,50,50,100);		'And display to the bottom left of screen
+    LTPCursorSet(avgdata%[0][1],1,1);
+
+    ampPlot(avgdata%);
+    slopePlot(avgdata%);
+else
+    Message("Error|Analysis can not be used while sampling");
+endif;
+
+
+return 1; 'This leaves toolbar active
+end;
+Func InputOutput%()         'Button 7 for I/O mode toggle
+if Mode% <> 1 then
+    Mode%:=1;
+    Helpercursorremember%:=Helpercursor%;
+    Helpercursor%:=0;
+    FileOpen("..\\LTP.sgcx",6);
+    ToolbarText("Input-Output mode");
+    ToolbarSet(7, "I/O mode: on", InputOutput%);    
+else
+    Mode%:=0;
+    Helpercursor%:=Helpercursorremember%;
+    ToolbarSet(7, "I/O mode: off", InputOutput%);
+endif;
+
+return 1;
+end
+
+Func Config%()              'Button 10 for Settings
+
+DlgCreate("LTPOnline Settings");
+DlgSlider(1,"Average for analysis in minutes",1,10,1,5);
+DlgReal(2,"Amplitude of Noise in mV",0,1,0,3,0.01);
+DlgReal(3,"Lowpass filter responses (mV amplitude)",0,5,0,4,0.1);
+DlgButton(2,"Get noise amplitude",GetNoisefile%,32,5);
+if Helpercursor% = 1 then
+    DlgButton(3,"On",ToggleHelpercursor%,2,7);
+else
+    DlgButton(3,"Off",ToggleHelpercursor%,2,7);
+endif;
+DlgSlider(4,"Minutes to average",1,10,1,5,29,8);
+DlgGroup("Filter options",0,2,52,4);
+DlgGroup("Average Cursors for Graphs",0,6,52,3);
+DlgGroup("ReScan",0,9,52,2);
+DlgText("LTP Online Skript Version: "+LTPOnlineVersion$+"\nResponse Detection Version: "+libLTPCursorVersion$+"\nAnalysis Tools Version: "+libAnalysisToolsVersion$,0,0);
+DlgShow(average,noisereject,lowpass,Helpercursortime);
+return 1; 'This leaves toolbar active
+end;
+Func Modedial%()            'Button 6 for Mode dial
+DlgCreate("Mode select");
+DlgButton(2,"Get max. noise amplitude",GetNoisefile%,2,1);  '24
+DlgButton(3,"Input-Output",InputOutput%,7,2);  '12
+DlgButton(4,"Baseline",Baseline%,8.5,3);  '9
+'DlgButton(5,"Potentiation",GetNoisefile%,7,4);  '12
+'DlgButton(6,"Record LTP",GetNoisefile%,7,5);    '10
+DlgShow();
+return 1;   'This leaves toolbar active
+end;
+func ChanSelectDlg(view%)
+var ch%;
+var ok%;
+View(view%);
+DlgCreate("Select Channel for Measurements");
+DlgChan(1,"Response channel",1);
+ok%:= DlgShow(ch%);					'User selects response channel
+if ok% = 0 then Halt; endif;		'..and we quit if user cancels
+Optimise(ch%);		'Optimise the response data
+return ch%;
+end;
+
+proc CursorSave(arr[], start%, end%)
+var n%;
+
+for n%:=start% to end% do
+        arr[n%-Start%]:=Cursor(n%);    
+next;
+
+return;
+end;
+Func GetNoisefile%();
+rawData% := FileNew(0,1);
+WindowVisible(1);	'Make it visible
+Window(0,0,50,100); 'And display on the left side of the screen
+WindowTitle$("Noise detection");
+Mode%:=-1;
+SampleState(0);
+PulseClear(0);
+ch%:=ChanSelectDlg(rawData%);
+SampleStart();
+return 0;
+end;
+Func GetMaxAmp()
+var maxamp;
+CursorNew(MinTime(),1);
+CursorNew(MinTime(),2);
+CursorActive(1,1,ch%,MinTime(),MaxTime());
+CursorActive(2,2,ch%,MinTime(),MaxTime());
+maxamp:=(ChanValue(ch%,Cursor(1))-ChanValue(ch%,Cursor(2)));
+return maxamp;
+end
+Proc Horizontalavg(frames%, view%)
+View(view%);
+var x[frames%/ChanCount()]; 'stores X data extracted from XY view
+var y[frames%/ChanCount()]; 'stores y data extracted from XY view
+var n%;                     'counter variable for channels
+var mean;                   'stores the mean value of the y data, which is the position to set the horizontal cursor to
+for n%:=1 to ChanCount()do
+    if XYCount(n%)-(frames%/ChanCount()) >= 0 then  'if frames% is smaller than array size
+        XYGetData(n%,x,y, XYCount(n%)-(frames%/ChanCount()));
+    else                                            'failsave if frames% is bigger than array size
+        XYGetData(n%,x,y)
+    endif;    
+    ArrSum(y,mean);    
+    if HCursorExists(n%) = 0 then
+        HCursorNew(n%, mean);
+    else
+        HCursor(n%,mean)
+    endif;  
+next;
+return;
+end
+Func ToggleHelpercursor%()
+if Helpercursor% = 1 then
+    Helpercursor%:= 0;
+    Helpercursorremember%:= 0;
+    DlgValue$(-3,"Off");
+    DlgEnable(0,4);
+else
+    Helpercursor%:= 1;
+    Helpercursorremember%:= 1;
+    DlgValue$(-3,"On");
+    DlgEnable(1,4);
+endif;
+return 1;
+end
+Func rescan%()              'Button 8 for rescanning files
+ToolbarText("Rescanning file");
+rawData%:= FileOpen("",0,1);    'display file open dialog
+CursorDelete(-1);   'clear all existing cursors
+Window(0,0,50,100); 'And display on the left side of the screen
+ch%:=ChanSelectDlg(rawData%); 'Diplay channel selection dialog
+slopePlot%:=-1; 'flag slope/amplot need to be created new
+Mode%:= -2; 'flag as rescan
+return 1;
+end
+Func GetBaselineStabilityValue(frames%,view%)
+View(view%);
+var x[frames%/ChanCount()]; 'stores X data extracted from XY view
+var y[frames%/ChanCount()]; 'stores y data extracted from XY view
+var n%;                     'counter variable for channels
+var n2%:=1;                    'counter variable for cursors
+var mean;                   'stores the mean value of the y data, which is the position to set the horizontal cursor to
+for n%:=1 to ChanCount()do
+    if XYCount(n%)-(frames%/ChanCount()) >= 0 then  'if frames% is smaller than array size
+        XYGetData(n%,x,y, XYCount(n%)-(frames%/ChanCount()));
+    else                                            'failsave if frames% is bigger than array size
+        XYGetData(n%,x,y);
+    endif;    
+    ArrSum(y,mean);
+    if Helpercursor% = 1 then        
+        if HCursorExists(ChanCount()+n2%) = 0 then
+            HCursorNew(ChanCount()+n2%,mean+mean*0.1);
+            n2%+=1;    
+            HCursorNew(ChanCount()+n2%,mean-mean*0.1);
+            n2%+=1;
+        else          
+            HCursor(ChanCount()+n2%,mean+mean*0.1);
+            n2%+=1;
+            HCursor(ChanCount()+n2%,mean-mean*0.1);
+            n2%+=1;            
+        endif;              
+    endif;   
+next;
+
+return;
+end
+Func Baseline%()
+Mode%:=2;
+ToolbarText("Baseline mode");
+return 1;
+end;

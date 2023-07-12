@@ -1,0 +1,122 @@
+'libAnalysisToolsv1.0
+'1.01: 27.11.2015 - set array size for x and y dynamically to get all the points. Now supports more than 50 Datapoint in Channel 2
+
+var libAnalysisToolsVersion$:="1.01";
+
+func ampPlot(view%[][])
+var n%:=2;
+var plot%;
+var ampPlot2%;
+
+View(view%[0][0]);
+plot%:=MeasureToXY(0);   'Set XY view for amplitude
+WindowVisible(1);	'Make visible
+MeasureX(104,view%[1][0],"0",0,MaxTime());
+MeasureY(101,view%[1][0],"Cursor(6)","Cursor(2)");
+MeasureChan(1,"Channel 1",0); 
+WindowTitle$("Ampliude of response");	
+XYJoin(1,1);	'Join the dots
+XYKey(1,1);		'Show the key
+ProcessFrames(1,-1,-1,0,1,1);	'Process all frames
+var x[XYCount(1)];
+var y[XYCount(1)];
+'XYGetData(1,x,y);
+Window(50,0,100,50);	'And display top-right of screen
+
+'while n% <= len(view%) do
+
+'arrclear(x);
+'arrclear(y);
+
+View(view%[0][n%-1]);
+ampPlot2%:=MeasureToXY(0);   'Set XY view for amplitude
+MeasureX(104,view%[1][n%-1],"0",0,MaxTime());
+MeasureY(101,view%[1][n%-1],"Cursor(6)","Cursor(2)");
+MeasureChan(1,"Amp.",0);    
+XYJoin(n%,1);	'Join the dots
+XYKey(1,1);		'Show the key
+ProcessFrames(1,-1,-1,0,1,1);	'Process all frames  
+XYGetData(1,x,y);
+FileClose(0,-1);
+View(plot%);
+XYSetChan(0);
+arrsubzero(x);
+arrsubzero(y);
+XYAddData(2,x,y);
+XYJoin(2,1);	'Join the dots
+XYDrawMode(2,1,6);
+          
+    'n%:=n%+1;
+'wend
+View(plot%);
+Optimise(-1);
+
+return plot%;
+end;
+
+func slopePlot(view%[][])
+var n%:=2;
+var plot%;
+var slopePlot2%;
+
+View(view%[0][0]);
+plot%:=MeasureToXY(0); 'Set XY view for slope
+WindowVisible(1);	'Make it visible
+MeasureX(104,view%[1][0],"0",0,MaxTime());
+MeasureY(3,view%[1][0],"Cursor(8)","Cursor(7)");
+MeasureChan(1,"Channel 1",0);
+WindowTitle$("Slope from 10% to 90%");	
+XYJoin(1,1);	'Join the dots	
+XYKey(1,1);		'Show the key
+ProcessFrames(1,-1,-1,0,1,1);	'Process all frames
+var x[XYCount(1)];
+var y[XYCount(1)];
+Window(50,50,100,100);	'And display bottom left of screen
+
+'arrclear(x);
+'arrclear(y);
+
+View(view%[0][n%-1]);
+slopePlot2%:=MeasureToXY(0); 'Set XY view for slope
+MeasureX(104,view%[1][n%-1],"0",0,MaxTime());
+MeasureY(3,view%[1][n%-1],"Cursor(8)","Cursor(7)");
+MeasureChan(1,"Slope",0);  
+XYJoin(n%,1);	'Join the dots	
+XYKey(1,1);		'Show the key    
+ProcessFrames(1,-1,-1,0,1,1);	'Process all frames
+XYGetData(1,x,y);
+FileClose(0,-1);
+View(plot%);
+XYSetChan(0);
+arrsubzero(x);
+arrsubzero(y);
+XYAddData(2,x,y);
+XYJoin(2,1);	'Join the dots
+XYDrawMode(2,1,6);
+
+View(plot%);
+Optimise(-1);
+
+return plot%;
+end;
+
+func arrsubzero(x[]);
+var n%:=len(x);
+while n% > 0 do
+    if x[n%-1] = 0 then
+        n%:=n%-1;
+    else break;
+    endif;
+wend;
+resize x[n%];    
+return;
+end;
+
+func arrclear(x[]);
+var n%:=0;
+while n% <> len(x) do
+    x[n%]:=0;
+    n%:=n%+1;
+wend;   
+return;
+end;
